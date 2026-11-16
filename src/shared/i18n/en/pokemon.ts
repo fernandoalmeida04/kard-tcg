@@ -1,0 +1,62 @@
+// Traduções para inglês (chave = texto em português). Grupo: pokemon (tipos, formatos, validação, download, rótulos comuns)
+const en: Record<string, string> = {
+  // Tipos de energia
+  Planta: 'Grass',
+  Fogo: 'Fire',
+  Água: 'Water',
+  Elétrico: 'Lightning',
+  Psíquico: 'Psychic',
+  Lutador: 'Fighting',
+  Escuridão: 'Darkness',
+  Metal: 'Metal',
+  Fada: 'Fairy',
+  Dragão: 'Dragon',
+  Incolor: 'Colorless',
+  // Categorias, estágios e Treinadores
+  Treinador: 'Trainer',
+  Energia: 'Energy',
+  Básico: 'Basic',
+  'Estágio 1': 'Stage 1',
+  'Estágio 2': 'Stage 2',
+  'V-ASTRO': 'VSTAR',
+  TURBO: 'BREAK',
+  Restaurado: 'Restored',
+  Bebê: 'Baby',
+  'Nível X': 'LV.X',
+  'V-UNIÃO': 'V-UNION',
+  Item: 'Item',
+  Apoiador: 'Supporter',
+  Estádio: 'Stadium',
+  'Ferramenta Pokémon': 'Pokémon Tool',
+  'Máquina Técnica': 'Technical Machine',
+  'Máquina Secreta da Equipe Rocket': "Rocket's Secret Machine",
+  'Energia Especial': 'Special Energy',
+  'Energia Básica': 'Basic Energy',
+  // Formatos
+  Ilimitado: 'Unlimited',
+  Livre: 'Casual',
+  'Formato oficial atual: coleções com marcas de regulamentação recentes. 60 cartas.': 'Current official format: sets with recent regulation marks. 60 cards.',
+  'Coleções desde Preto e Branco, com lista de banidas. 60 cartas.': 'Sets from Black & White onward, with a ban list. 60 cards.',
+  'Todas as cartas já lançadas. 60 cartas.': 'Every card ever released. 60 cards.',
+  'Sem restrições de tamanho ou legalidade.': 'No size or legality restrictions.',
+  // Validação de deck
+  '{name} não é legal em {format}.': '{name} is not legal in {format}.',
+  '1 carta não encontrada no banco local: {names}': '1 card not found in the local database: {names}',
+  '{n} cartas não encontradas no banco local: {names}': '{n} cards not found in the local database: {names}',
+  'O deck deve ter exatamente {size} cartas. Atual: {n}.': 'The deck must have exactly {size} cards. Current: {n}.',
+  'O deck precisa de pelo menos 1 Pokémon Básico.': 'The deck needs at least 1 Basic Pokémon.',
+  'Sem Pokémon Básico: não será possível começar uma partida.': 'No Basic Pokémon: you will not be able to start a game.',
+  '{name}: apenas 1 cópia permitida ({n}).': '{name}: only 1 copy allowed ({n}).',
+  '{name}: no máximo 4 cópias com o mesmo nome ({n}).': '{name}: at most 4 copies with the same name ({n}).',
+  'Apenas 1 carta ACE SPEC por deck ({n}).': 'Only 1 ACE SPEC card per deck ({n}).',
+  'Apenas 1 Pokémon Radiante por deck ({n}).': 'Only 1 Radiant Pokémon per deck ({n}).',
+  'O deck não tem cartas de Energia.': 'The deck has no Energy cards.',
+  // Download (TCGdex)
+  'Um download já está em andamento.': 'A download is already in progress.',
+  'Consultando o TCGdex...': 'Contacting TCGdex...',
+  'Baixando cartas (dados de regras)...': 'Downloading cards (rules data)...',
+  'Baixando nomes e textos traduzidos ({lang})...': 'Downloading translated names and texts ({lang})...',
+  'Montando e salvando o banco local...': 'Building and saving the local database...'
+}
+
+export default en

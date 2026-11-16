@@ -1,0 +1,12 @@
+{
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "files.exclude": {
+    "out": true,
+    "release": true
+  },
+  "search.exclude": {
+    "database": true,
+    "out": true,
+    "release": true
+  }
+}

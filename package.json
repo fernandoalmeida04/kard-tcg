@@ -1,0 +1,44 @@
+{
+  "name": "kard-tcg",
+  "productName": "Kard - TCG Simulator",
+  "version": "0.1.0",
+  "description": "Kard - TCG Simulator: banco de cartas, construtor de decks e partidas contra bot com juiz de regras.",
+  "main": "./out/main/index.js",
+  "author": "Kard",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "start": "electron-vite preview",
+    "build": "electron-vite build",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "test:engine": "node --experimental-strip-types --no-warnings scripts/engine-smoke.ts",
+    "dist": "npm run typecheck && electron-vite build && electron-builder --win --x64 --publish never",
+    "dist:dir": "electron-vite build && electron-builder --win --x64 --dir --publish never",
+    "release": "npm run typecheck && electron-vite build && electron-builder --win --x64 --publish always",
+    "test:multiplayer": "node --experimental-strip-types --no-warnings scripts/engine-multiplayer.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "1.8.0",
+    "@supabase/server": "^1.9.2",
+    "@supabase/supabase-js": "^2.119.0",
+    "electron-updater": "^6.8.11",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.3.0",
+    "electron": "45.3.2",
+    "electron-builder": "26.18.0",
+    "electron-vite": "6.0.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "typescript": "5.9.3",
+    "vite": "8.3.8",
+    "zustand": "5.1.0"
+  }
+}
