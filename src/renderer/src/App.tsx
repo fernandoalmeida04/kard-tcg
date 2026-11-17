@@ -6,16 +6,23 @@ import HomePage from './pages/Home'
 import DatabasePage from './pages/Database'
 import DecksPage from './pages/Decks'
 import DeckEditor from './pages/DeckEditor'
-import PlayPage from './pages/Play'
+import SandboxPlay from './sandbox/SandboxPlay'
 import SettingsPage from './pages/Settings'
 import CollectionPage from './pages/Collection'
 import OnlinePage from './online/OnlinePage'
 import { clearCardCache } from './cardCache'
-import { useGame } from './game/gameStore'
+import { useSandbox } from './sandbox/sandboxStore'
 import TcgSelector, { ComingSoon } from './components/TcgSelector'
 import AccountButton from './auth/AccountButton'
 import UpdateBanner from './components/UpdateBanner'
 import AuthModal from './auth/AuthModal'
+import ProfileModal, { ProfileViewer } from './auth/ProfileModal'
+import FriendsPage from './social/FriendsPage'
+import { InviteToasts } from './social/SocialWidgets'
+import { FriendsDock } from './social/FriendsDock'
+import AdminPage, { AnnouncementBanner, BannedBanner, useAdminIds } from './admin/AdminPage'
+import { ErrorBoundary } from './components/ErrorBoundary'
+import { useSocial } from './social/socialStore'
 import { useAuth } from './auth/authStore'
 import PkmHome from './pokemon/PkmHome'
 import PkmDatabase from './pokemon/PkmDatabase'
@@ -41,7 +48,7 @@ export default function App() {
   const page = useApp((s) => s.page)
   const go = useApp((s) => s.go)
   const inGame = useApp((s) => s.inGame)
-  const gameActive = useGame((s) => s.state !== null)
+  const gameActive = useSandbox((s) => s.state !== null)
   const refreshDb = useApp((s) => s.refreshDb)
   const loadSettings = useApp((s) => s.loadSettings)
   const setProgress = useApp((s) => s.setProgress)
@@ -73,6 +80,16 @@ export default function App() {
 
   // conta do usuário (Supabase)
   useEffect(() => useAuth.getState().init(), [])
+  // amigos online, pedidos e convites da conta logada
+  const userId = useAuth((s) => s.user?.id ?? null)
+  const banned = useAuth((s) => s.user?.banned === true)
+  const isAdmin = useAuth((s) => s.user?.isAdmin === true)
+  // conta suspensa: sem amigos/presença online
+  useEffect(() => useSocial.getState().start(banned ? null : userId), [userId, banned])
+  // selo "Administrador" nos perfis
+  useEffect(() => {
+    if (userId) useAdminIds.getState().load()
+  }, [userId])
 
   const showSidebar = !((page === 'play' || page === 'online') && inGame && gameActive)
 
@@ -103,6 +120,12 @@ export default function App() {
               {t(n.label)}
             </button>
           ))}
+          {isAdmin && (
+            <button className={`nav-btn ${page === 'admin' ? 'active' : ''}`} onClick={() => go('admin')}>
+              <span className="ico">🛡</span>
+              {t('Administração')}
+            </button>
+          )}
           <div className="spacer" />
           <UpdateBanner />
           <AccountButton />
@@ -135,12 +158,23 @@ export default function App() {
         </aside>
       )}
       <main style={{ minWidth: 0, minHeight: 0 }}>
+        {showSidebar && (
+          <>
+            <BannedBanner />
+            <AnnouncementBanner />
+          </>
+        )}
+        <ErrorBoundary name="page" key={page}>
         {page === 'settings' ? (
           <SettingsPage />
+        ) : page === 'admin' ? (
+          <AdminPage />
+        ) : page === 'friends' ? (
+          <FriendsPage />
         ) : page === 'collection' ? (
           <CollectionPage key={tcg} />
         ) : page === 'online' ? (
-          tcg === 'mtg' ? <OnlinePage /> : <ComingSoon title={t('Jogar online')} message={t('As partidas online estão disponíveis por enquanto só para Magic: The Gathering.')} />
+          tcg === 'mtg' || tcg === 'pokemon' ? <OnlinePage /> : <ComingSoon title={t('Jogar online')} message={t('As partidas online estão disponíveis por enquanto para Magic: The Gathering e Pokémon TCG.')} />
         ) : isGameId(tcg) ? (
           <>
             {page === 'home' && <GameHome game={tcg} />}
@@ -157,7 +191,7 @@ export default function App() {
             {page === 'decks' && <PkmDecks />}
             {page === 'editor' && <PkmDeckEditor />}
             {/* partidas de Pokémon ainda não existem */}
-            {page === 'play' && <ComingSoon title={t('Teste de deck')} message={t('As partidas de Pokémon ainda estão em desenvolvimento. Por enquanto, você já pode baixar o banco de cartas e montar seus decks.')} />}
+            {page === 'play' && <SandboxPlay game="pokemon" />}
           </>
         ) : (
           <>
@@ -165,13 +199,27 @@ export default function App() {
             {page === 'database' && <DatabasePage />}
             {page === 'decks' && <DecksPage />}
             {page === 'editor' && <DeckEditor />}
-            {page === 'play' && <PlayPage />}
+            {page === 'play' && <SandboxPlay game="mtg" />}
           </>
         )}
+        </ErrorBoundary>
       </main>
       <Toasts />
       <ContextMenu />
       <AuthModal />
+      <ErrorBoundary name="profile" silent>
+        <ProfileModal />
+        <ProfileViewer />
+      </ErrorBoundary>
+      <ErrorBoundary name="invites" silent>
+        <InviteToasts />
+      </ErrorBoundary>
+      {/* na mesa de jogo (tela cheia) o botão sairia por cima das cartas */}
+      {showSidebar && (
+        <ErrorBoundary name="friends-dock" silent>
+          <FriendsDock />
+        </ErrorBoundary>
+      )}
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { app, dialog, type BrowserWindow } from 'electron'
+import { app, dialog, nativeImage, type BrowserWindow } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import type { Settings } from '../shared/types'
@@ -53,6 +53,31 @@ export async function choosePlaymat(win: BrowserWindow | null): Promise<Settings
 export function clearPlaymat(): Settings {
   clearDir()
   return setPlaymatImage(null)
+}
+
+/**
+ * Versão reduzida do playmat para enviar aos outros jogadores da mesa online
+ * (as mensagens do Realtime têm limite de tamanho): JPEG de até 1280px de largura.
+ */
+export function playmatShareData(): string | null {
+  const name = getSettings().playmatImage
+  if (!name) return null
+  const file = path.join(playmatDir(), path.basename(name))
+  if (!fs.existsSync(file)) return null
+  let img = nativeImage.createFromPath(file)
+  if (!img.isEmpty()) {
+    const { width } = img.getSize()
+    if (width > 1280) img = img.resize({ width: 1280, quality: 'good' })
+    for (const q of [72, 55, 40]) {
+      const jpg = img.toJPEG(q)
+      if (jpg.length <= 360_000) return `data:image/jpeg;base64,${jpg.toString('base64')}`
+    }
+    return null
+  }
+  // formato que o nativeImage não decodifica (webp, gif...): envia o arquivo original se for pequeno
+  const type = EXT_TYPES[path.extname(file).toLowerCase()]
+  const data = fs.readFileSync(file)
+  return type && data.length <= 360_000 ? `data:${type};base64,${data.toString('base64')}` : null
 }
 
 /** Lê a imagem do playmat para o protocolo kard-img://playmat/<nome>. */

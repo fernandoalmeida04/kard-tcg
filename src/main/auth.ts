@@ -107,12 +107,28 @@ const fail = (err: unknown): AuthResult => ({ ok: false, error: message(err as E
 
 async function toAuthUser(u: User | null | undefined): Promise<AuthUser | null> {
   if (!u) return null
-  const { data } = await sb().from('profiles').select('username').eq('id', u.id).maybeSingle()
+  let { data, error } = await sb().from('profiles').select('username, avatar_url, display_name').eq('id', u.id).maybeSingle()
+  // schema.sql antigo (sem as colunas do perfil): lê só o nome de usuário
+  if (error) ({ data } = await sb().from('profiles').select('username').eq('id', u.id).maybeSingle())
+  // cargo de administrador e suspensão (painel administrativo); schema antigo = conta comum
+  let status: { admin?: boolean; banned?: boolean; reason?: string | null; until?: string | null } = {}
+  try {
+    const r = await sb().rpc('my_account_status')
+    if (!r.error && r.data) status = r.data
+  } catch {
+    /* sem a função no banco */
+  }
   return {
     id: u.id,
     email: u.email ?? '',
     username: (data?.username as string | null) ?? null,
-    provider: (u.app_metadata?.provider as string | undefined) ?? 'email'
+    provider: (u.app_metadata?.provider as string | undefined) ?? 'email',
+    avatarUrl: (data?.avatar_url as string | null | undefined) ?? null,
+    displayName: (data?.display_name as string | null | undefined) ?? null,
+    isAdmin: status.admin === true,
+    banned: status.banned === true,
+    banReason: status.reason ?? null,
+    banUntil: status.until ?? null
   }
 }
 
@@ -240,6 +256,12 @@ export async function setUsername(username: string): Promise<AuthResult> {
   } catch (err) {
     return fail(err)
   }
+}
+
+/** Avisa a interface que os dados da conta mudaram (perfil, foto). */
+export async function notifyAuthChange(): Promise<void> {
+  const user = await currentUser()
+  listeners.forEach((cb) => cb(user))
 }
 
 export async function signOut(): Promise<void> {

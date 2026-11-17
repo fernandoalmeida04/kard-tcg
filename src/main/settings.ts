@@ -2,6 +2,7 @@ import { safeStorage } from 'electron'
 import fs from 'fs'
 import { settingsFile } from './paths'
 import type { Settings, SettingsUpdate } from '../shared/types'
+import { DEFAULT_PKM_LAYOUT, normalizePkmLayout } from '../shared/types'
 import { UI_LANGUAGES, setUiLang } from '../shared/i18n/index.ts'
 import { DEFAULT_BOARD_LAYOUT, DEFAULT_MAT_LAYOUT, normalizeBoardLayout, normalizeMatLayout } from '../shared/board'
 
@@ -25,7 +26,10 @@ const DEFAULTS: StoredSettings = {
   matLayout: DEFAULT_MAT_LAYOUT,
   playmatImage: null,
   playmatDim: 0.35,
-  playmatBoth: false
+  playmatBoth: false,
+  shareEngineIssues: true,
+  pkmLayout: DEFAULT_PKM_LAYOUT,
+  drawAnimation: true
 }
 
 let current: StoredSettings | null = null
@@ -63,6 +67,8 @@ export function updateSettings(update: SettingsUpdate): Settings {
   s.playmatDim = Math.min(0.85, Math.max(0, Number(s.playmatDim) || 0))
   if (rest.boardLayout) s.boardLayout = normalizeBoardLayout(rest.boardLayout)
   if (rest.matLayout) s.matLayout = normalizeMatLayout(rest.matLayout)
+  s.pkmLayout = normalizePkmLayout(s.pkmLayout)
+  s.drawAnimation = s.drawAnimation !== false
   if (s.playMode !== 'drag') s.playMode = 'click'
   if (!['mtg', 'pokemon', 'ygo'].includes(s.tcg)) s.tcg = 'mtg'
   if (!UI_LANGUAGES.some((l) => l.code === s.uiLanguage)) s.uiLanguage = 'pt'

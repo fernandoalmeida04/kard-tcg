@@ -17,7 +17,7 @@ npmRebuild: false
 # Troque owner/repo pelos seus (veja PUBLICAR.md).
 publish:
   provider: github
-  owner: SEU-USUARIO-GITHUB
+  owner: fernandoalmeida04
   repo: kard-tcg
   releaseType: draft
 win:

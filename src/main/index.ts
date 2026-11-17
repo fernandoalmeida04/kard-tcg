@@ -10,7 +10,7 @@ import { cancelDownload, downloadDatabase } from './scryfall'
 import { clearImageCache, prefetchImages, registerImageProtocol } from './images'
 import { getDeck, listDecks, removeDeck, saveDeck } from './decks'
 import { getSettings, updateSettings } from './settings'
-import { choosePlaymat, clearPlaymat } from './playmat'
+import { choosePlaymat, clearPlaymat, playmatShareData } from './playmat'
 import { pkmDb } from './pokemon/pkmDb'
 import { cancelPkmDownload, downloadPokemonDatabase } from './pokemon/tcgdex'
 import { getPkmDeck, listPkmDecks, removePkmDeck, savePkmDeck } from './pokemon/pkmDecks'
@@ -23,6 +23,13 @@ import { cancelGameDownload, downloadGameDatabase, getGameDeck, listGameDecks, r
 import { GAME_IDS, isGameId } from '../shared/games/registry'
 import type { GameId, GDeck, GSearchQuery } from '../shared/games/types'
 import { askJudge, resolveEffect, testJudge } from './judge'
+import { chooseAvatar, getProfile, getPublicProfiles, removeAvatar, saveProfile } from './profile'
+import { aiComplete, type AiRequest } from './ai'
+import { dismissInvite, initSocial, inviteFriend, listFriends, pendingInvites, removeFriend, respondFriendRequest, searchUsers, sendFriendRequest, startSocial } from './social'
+import { clearIssues, clearRemoteIssues, exportIssues, flushRemote, issuesMarkdown, listIssues, listRemoteIssues, recordIssues, remoteIsAdmin, type IssueSource } from './engineIssues'
+import type { IssueInput } from '../shared/engineIssues'
+import { adminBan, adminIds, adminLog, adminResetAi, adminSetAdmin, adminSetAiLimit, adminSetAnnouncement, adminStats, adminUnban, adminUsers, getAnnouncement } from './admin'
+import type { Announcement } from '../shared/types'
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'kard-img', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }
@@ -91,6 +98,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.settingsSet, (_e, update: SettingsUpdate) => updateSettings(update))
   ipcMain.handle(IPC.playmatChoose, () => choosePlaymat(mainWindow))
   ipcMain.handle(IPC.playmatClear, () => clearPlaymat())
+  ipcMain.handle(IPC.playmatShare, () => playmatShareData())
 
   ipcMain.handle(IPC.dbStatus, () => db.status())
   ipcMain.handle(IPC.dbDownload, async (_e, lang: LangCode) => {
@@ -192,11 +200,54 @@ function registerIpc(): void {
   ipcMain.handle(IPC.authGoogle, () => signInWithGoogle())
   ipcMain.handle(IPC.authSetUsername, (_e, username: string) => setUsername(username))
   ipcMain.handle(IPC.authSignOut, () => signOut())
-  onAuthChange((u) => mainWindow?.webContents.send(IPC.authChanged, u))
+  ipcMain.handle(IPC.profileGet, () => getProfile())
+  ipcMain.handle(IPC.profileSave, (_e, info) => saveProfile(info))
+  ipcMain.handle(IPC.profileAvatar, () => chooseAvatar(mainWindow))
+  ipcMain.handle(IPC.profileAvatarRemove, () => removeAvatar())
+  ipcMain.handle(IPC.profilePublic, (_e, ids: string[]) => getPublicProfiles(ids))
+  // IA (Juiz e bot)
+  ipcMain.handle(IPC.aiComplete, (_e, req: AiRequest) => aiComplete(req))
+  // Amigos
+  ipcMain.handle(IPC.socialList, () => listFriends())
+  ipcMain.handle(IPC.socialSearch, (_e, q: string) => searchUsers(q))
+  ipcMain.handle(IPC.socialRequest, (_e, id: string) => sendFriendRequest(id))
+  ipcMain.handle(IPC.socialRespond, (_e, id: string, accept: boolean) => respondFriendRequest(id, accept))
+  ipcMain.handle(IPC.socialRemove, (_e, id: string) => removeFriend(id))
+  ipcMain.handle(IPC.socialInvite, (_e, id: string, code: string) => inviteFriend(id, code))
+  ipcMain.handle(IPC.socialDismiss, (_e, id: number) => dismissInvite(id))
+  ipcMain.handle(IPC.socialPending, () => pendingInvites())
+  onAuthChange((u) => {
+    mainWindow?.webContents.send(IPC.authChanged, u)
+    // entrou na conta: envia os problemas do motor que estavam esperando
+    if (u) void flushRemote()
+    void startSocial(u?.id ?? null)
+  })
+  // problemas que ficaram na fila da última vez (sem internet ou sem login)
+  setTimeout(() => void flushRemote(), 15_000)
 
   ipcMain.handle(IPC.judgeEffect, (_e, req: JudgeEffectRequest) => resolveEffect(req))
   ipcMain.handle(IPC.judgeAsk, (_e, req: JudgeQuestionRequest) => askJudge(req))
   ipcMain.handle(IPC.judgeTest, () => testJudge())
+  // Relatório de problemas do motor
+  ipcMain.handle(IPC.issuesRecord, (_e, list: IssueInput[]) => recordIssues(list))
+  ipcMain.handle(IPC.issuesList, () => listIssues())
+  ipcMain.handle(IPC.issuesClear, (_e, keys?: string[]) => clearIssues(keys))
+  ipcMain.handle(IPC.issuesExport, (_e, fixed: string[], source?: IssueSource) => exportIssues(mainWindow, fixed ?? [], source))
+  ipcMain.handle(IPC.issuesMarkdown, (_e, fixed: string[], source?: IssueSource) => issuesMarkdown(fixed ?? [], source))
+  ipcMain.handle(IPC.issuesRemoteAdmin, () => remoteIsAdmin())
+  ipcMain.handle(IPC.issuesRemoteList, () => listRemoteIssues())
+  ipcMain.handle(IPC.adminStats, () => adminStats())
+  ipcMain.handle(IPC.adminUsers, (_e, q: string, sort: 'recent' | 'active' | 'ai', offset: number) => adminUsers(q, ['recent', 'active', 'ai'].includes(sort) ? sort : 'recent', Number(offset) || 0))
+  ipcMain.handle(IPC.adminSetAdmin, (_e, id: string, make: boolean) => adminSetAdmin(String(id), Boolean(make)))
+  ipcMain.handle(IPC.adminBan, (_e, id: string, reason: string, days: number | null) => adminBan(String(id), String(reason ?? ''), typeof days === 'number' ? days : null))
+  ipcMain.handle(IPC.adminUnban, (_e, id: string) => adminUnban(String(id)))
+  ipcMain.handle(IPC.adminResetAi, (_e, id: string) => adminResetAi(String(id)))
+  ipcMain.handle(IPC.adminSetAnnouncement, (_e, a: Announcement | null) => adminSetAnnouncement(a && typeof a.text === 'string' ? a : null))
+  ipcMain.handle(IPC.adminSetAiLimit, (_e, limit: number | null) => adminSetAiLimit(typeof limit === 'number' && Number.isFinite(limit) ? limit : null))
+  ipcMain.handle(IPC.adminLog, () => adminLog())
+  ipcMain.handle(IPC.adminAnnouncement, () => getAnnouncement())
+  ipcMain.handle(IPC.adminIds, () => adminIds())
+  ipcMain.handle(IPC.issuesRemoteClear, (_e, keys: string[]) => clearRemoteIssues(Array.isArray(keys) ? keys : []))
 }
 
 const gotLock = app.requestSingleInstanceLock()
@@ -219,6 +270,9 @@ if (!gotLock) {
     if (mainWindow) {
       initUpdater(mainWindow)
       initOnline(mainWindow)
+      initSocial(mainWindow)
+      // já logado ao abrir o app: liga amigos online e convites
+      void currentUser().then((u) => startSocial(u?.id ?? null))
     }
     // Carrega o banco local em segundo plano (pode levar alguns segundos)
     db.loadFromDisk().then(() => mainWindow?.webContents.send(IPC.dbProgress, { phase: 'idle', current: 0, total: 0, message: 'db-loaded' }))

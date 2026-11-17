@@ -8,6 +8,9 @@ interface AuthStore {
   loaded: boolean
   /** Janela de login aberta (e em qual passo começa). */
   modal: 'login' | 'signup' | 'username' | null
+  /** Janela "Meu Perfil" aberta. */
+  profileOpen: boolean
+  setProfileOpen: (open: boolean) => void
   init: () => () => void
   open: (step: 'login' | 'signup' | 'username') => void
   close: () => void
@@ -19,6 +22,8 @@ export const useAuth = create<AuthStore>((set, get) => ({
   user: null,
   loaded: false,
   modal: null,
+  profileOpen: false,
+  setProfileOpen: (profileOpen) => set({ profileOpen }),
   init: () => {
     const api = window.kard.auth
     if (!api) {

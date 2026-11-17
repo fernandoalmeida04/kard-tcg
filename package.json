@@ -1,7 +1,7 @@
 {
   "name": "kard-tcg",
   "productName": "Kard - TCG Simulator",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Kard - TCG Simulator: banco de cartas, construtor de decks e partidas contra bot com juiz de regras.",
   "main": "./out/main/index.js",
   "author": "Kard",
@@ -18,7 +18,11 @@
     "dist": "npm run typecheck && electron-vite build && electron-builder --win --x64 --publish never",
     "dist:dir": "electron-vite build && electron-builder --win --x64 --dir --publish never",
     "release": "npm run typecheck && electron-vite build && electron-builder --win --x64 --publish always",
-    "test:multiplayer": "node --experimental-strip-types --no-warnings scripts/engine-multiplayer.ts"
+    "test:multiplayer": "node --experimental-strip-types --no-warnings scripts/engine-multiplayer.ts",
+    "test:issues": "node --experimental-strip-types --no-warnings scripts/engine-issues.ts",
+    "test:sandbox": "node --experimental-strip-types --no-warnings scripts/sandbox-smoke.ts",
+    "test:pkm": "node --experimental-strip-types --no-warnings scripts/pkm-engine-rules.ts && node --experimental-strip-types --no-warnings scripts/pkm-engine-stress.ts 30",
+    "pkm:coverage": "node --experimental-strip-types --no-warnings scripts/pkm-coverage.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "1.8.0",

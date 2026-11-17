@@ -270,7 +270,11 @@ export type StaticAbility =
   | { k: 'noMaxHandSize' }
 
 /** Contagens usadas por P/R variáveis: "igual ao número de terrenos que você controla" etc. */
-export type CountExpr = 'lands' | 'creatures' | 'otherCreatures' | 'artifacts' | 'enchantments' | 'hand' | 'graveyard' | 'creatureCardsGraveyard' | 'forests' | 'swamps' | 'islands' | 'mountains' | 'plains'
+export type CountExpr =
+  | 'lands' | 'creatures' | 'otherCreatures' | 'artifacts' | 'enchantments' | 'hand' | 'graveyard' | 'creatureCardsGraveyard'
+  | 'forests' | 'swamps' | 'islands' | 'mountains' | 'plains'
+  /** devoção às cores indicadas (ex.: 'devotion:W', 'devotion:WU') */
+  | `devotion:${string}`
 
 export interface ParsedCard {
   spell?: EffectBlock & { modes?: EffectBlock[]; chooseCount?: number }
@@ -345,6 +349,10 @@ export interface GameObject {
   timestamp: number
   /** Para cartas na mão do oponente: revelada ao jogador? */
   revealed?: boolean
+  /** Poder/resistência base definidos à mão (cartas com "*" impresso e regra que o motor não entende). */
+  ptOverride?: { power: number; toughness: number }
+  /** Já avisou que o poder/resistência desta carta é desconhecido? */
+  ptWarned?: boolean
 }
 
 export type TargetChoice = { kind: 'player'; player: PlayerId } | { kind: 'object'; id: string } | { kind: 'stack'; id: string }
@@ -482,6 +490,33 @@ export interface GameState {
   extraTurns?: number[]
   fogTurn?: number
   delayed?: { controller: PlayerId; ids: string[]; action: 'sacrifice' | 'exile' | 'bounce'; afterTurn: number; afterStep: string }[]
+  /** Problemas do motor nesta partida (texto não entendido, Juiz IA, ajustes manuais...), para o relatório. */
+  issues?: EngineIssueEvent[]
+  /** Total de problemas já anotados (as anotações antigas são descartadas; este contador só cresce). */
+  issueSeq?: number
+}
+
+/**
+ * Tipos de problema registrados para o relatório do motor:
+ * - unparsed: texto de carta que o motor não automatiza (sem Juiz IA)
+ * - aiJudge: texto que precisou do Juiz IA
+ * - aiFailed: o Juiz IA falhou e o efeito não foi aplicado
+ * - manual: um jogador corrigiu o estado com ajuste manual (sinal de que o motor errou)
+ * - unknownPT: criatura "*" cujo poder/resistência o motor não sabe calcular
+ * - crash: erro interno do motor ao processar uma jogada
+ * - botRejected: o bot propôs uma jogada que o motor recusou
+ * - userReport: problema descrito pelo jogador
+ */
+export type EngineIssueKind = 'unparsed' | 'aiJudge' | 'aiFailed' | 'manual' | 'unknownPT' | 'crash' | 'botRejected' | 'userReport'
+
+export interface EngineIssueEvent {
+  kind: EngineIssueKind
+  /** Nome em inglês (oracle) da carta envolvida. */
+  card?: string
+  text: string
+  turn: number
+  /** Últimas linhas do registro da partida no momento do problema. */
+  context?: string[]
 }
 
 // ---------------- Ações ----------------
@@ -493,6 +528,7 @@ export type ManualOp =
   | { op: 'move'; id: string; to: 'hand' | 'graveyard' | 'exile' | 'battlefield' | 'libraryTop' | 'libraryBottom' }
   | { op: 'draw'; player: PlayerId }
   | { op: 'damage'; id: string; delta: number }
+  | { op: 'setPT'; id: string; power: number; toughness: number }
 
 export type Action =
   | { t: 'pass' }
@@ -515,6 +551,8 @@ export type Action =
 export interface ActionResult {
   state: GameState
   error?: string
+  /** Erro interno do motor (exceção): a jogada foi desfeita. Mensagem + pilha, para o relatório. */
+  crash?: string
 }
 
 export interface PlayerSetup {

@@ -7,15 +7,21 @@ import { t } from '@shared/i18n'
 import { useApp } from '../store'
 import { useAuth } from '../auth/authStore'
 import { getCards } from '../cardCache'
-import { useGame } from '../game/gameStore'
-import GameTable from '../game/GameTable'
+import { SandboxTable, ColorPicker } from '../sandbox/SandboxPlay'
+import { useSandbox } from '../sandbox/sandboxStore'
 import { formatsForMode, useOnline } from './onlineStore'
+import { usePlayerProfiles, useProfiles } from './profiles'
+import { InviteFriendsPanel } from '../social/SocialWidgets'
+import { Avatar } from '../auth/ProfileModal'
+import type { PkmDeck, PkmDeckSummary } from '@shared/pokemon/types'
+import { PKM_FORMATS, getPkmFormat, validatePkmDeck } from '@shared/pokemon/formats'
+import { getPkmCards } from '../pokemon/pkmCommon'
 
 export default function OnlinePage() {
   const inGame = useApp((s) => s.inGame)
-  const gameState = useGame((s) => s.state)
+  const sbState = useSandbox((s) => s.state)
   const phase = useOnline((s) => s.phase)
-  if (phase === 'game' && inGame && gameState) return <GameTable />
+  if (phase === 'game' && inGame && sbState) return <SandboxTable />
   return <OnlineLobby />
 }
 
@@ -26,11 +32,22 @@ function OnlineLobby() {
   const db = useApp((s) => s.db)
   const phase = useOnline((s) => s.phase)
   const error = useOnline((s) => s.error)
+  const appTcg = useApp((s) => s.settings?.tcg ?? 'mtg')
 
   if (!configured) {
     return (
       <Shell>
         <div className="panel muted">{t('O login ainda não foi configurado neste computador. Siga o passo a passo do arquivo SUPABASE.md e reinicie o app.')}</div>
+      </Shell>
+    )
+  }
+  if (user?.banned) {
+    return (
+      <Shell>
+        <div className="panel">
+          ⛔ {user.banUntil ? t('Sua conta está suspensa até {date}.', { date: new Date(user.banUntil).toLocaleString() }) : t('Sua conta está suspensa.')}
+          {user.banReason && <div className="small muted" style={{ marginTop: 6 }}>{t('Motivo: {reason}', { reason: user.banReason })}</div>}
+        </div>
       </Shell>
     )
   }
@@ -46,7 +63,7 @@ function OnlineLobby() {
       </Shell>
     )
   }
-  if (!db?.ready) {
+  if (appTcg === 'mtg' && !db?.ready) {
     return (
       <Shell>
         <div className="panel muted">{t('Baixe o banco de cartas primeiro.')}</div>
@@ -83,15 +100,20 @@ function Shell({ children }: { children: React.ReactNode }) {
 function CreateOrJoin() {
   const createRoom = useOnline((s) => s.createRoom)
   const joinRoom = useOnline((s) => s.joinRoom)
+  const pokemon = useApp((s) => s.settings?.tcg === 'pokemon')
   const [mode, setMode] = useState<RoomMode>('duel')
-  const [format, setFormat] = useState('casual')
+  const [format, setFormat] = useState(pokemon ? 'standard' : 'casual')
   const [code, setCode] = useState('')
-  const formats = useMemo(() => FORMATS.filter((f) => formatsForMode(mode).includes(f.id)), [mode])
+  const formats = useMemo(
+    () => (pokemon ? PKM_FORMATS.map((f) => ({ id: f.id as string, name: f.name })) : FORMATS.filter((f) => formatsForMode(mode).includes(f.id)).map((f) => ({ id: f.id as string, name: f.name }))),
+    [mode, pokemon]
+  )
 
   return (
     <div className="row" style={{ alignItems: 'stretch', gap: 16 }}>
       <div className="panel grow">
-        <h3>{t('Criar mesa')}</h3>
+        <h3>{pokemon ? t('Criar mesa de Pokémon') : t('Criar mesa')}</h3>
+        {!pokemon && (
         <div className="row" style={{ gap: 14, marginBottom: 10 }}>
           <label className="check">
             <input type="radio" checked={mode === 'duel'} onChange={() => setMode('duel')} /> {t('1 contra 1')}
@@ -108,7 +130,8 @@ function CreateOrJoin() {
             {t('Commander (até 4 jogadores)')}
           </label>
         </div>
-        {mode === 'duel' && (
+        )}
+        {(mode === 'duel' || pokemon) && (
           <label className="field">
             {t('Formato')}
             <select value={format} onChange={(e) => setFormat(e.target.value)}>
@@ -120,7 +143,7 @@ function CreateOrJoin() {
             </select>
           </label>
         )}
-        <button className="btn primary" style={{ marginTop: 12 }} onClick={() => void createRoom(mode, mode === 'commander' ? 'commander' : format)}>
+        <button className="btn primary" style={{ marginTop: 12 }} onClick={() => void createRoom(pokemon ? 'duel' : mode, !pokemon && mode === 'commander' ? 'commander' : format, pokemon ? 'pokemon' : 'mtg')}>
           ＋ {t('Criar mesa')}
         </button>
         <div className="small muted" style={{ marginTop: 8 }}>
@@ -150,33 +173,42 @@ function CreateOrJoin() {
 
 function Lobby() {
   const s = useOnline()
-  const settings = useApp((st) => st.settings)
   const toast = useApp((st) => st.toast)
-  const [decks, setDecks] = useState<DeckSummary[]>([])
+  const [decks, setDecks] = useState<(DeckSummary | PkmDeckSummary)[]>([])
   const [deckId, setDeckId] = useState<string>('')
-  const [deck, setDeck] = useState<Deck | null>(null)
-  const [validation, setValidation] = useState<DeckValidation | null>(null)
+  const [deck, setDeck] = useState<Deck | PkmDeck | null>(null)
+  const [validation, setValidation] = useState<Pick<DeckValidation, 'valid' | 'errors'> | null>(null)
   const [chatText, setChatText] = useState('')
-  const [useAi, setUseAi] = useState(false)
   const cfg = s.config!
   const host = cfg.hostId === s.myId
   const me = s.players.find((p) => p.userId === s.myId)
-  const fmt = getFormat(cfg.format)
+  const pokemon = cfg.tcg === 'pokemon'
+  const fmt = pokemon ? { name: getPkmFormat(cfg.format).name } : getFormat(cfg.format)
   const onlineIds = new Set(s.presence.map((p) => p.userId))
-  const aiAvailable = Boolean(settings?.aiJudgeEnabled && settings.hasApiKey)
 
   useEffect(() => {
-    window.kard.decks.list().then((list) => {
+    const load = pokemon ? window.kard.pkm.decks.list() : window.kard.decks.list()
+    void load.then((list: (DeckSummary | PkmDeckSummary)[]) => {
       // decks do formato da mesa primeiro
       const sorted = [...list].sort((a, b) => Number(b.format === cfg.format) - Number(a.format === cfg.format))
       setDecks(sorted)
     })
-  }, [cfg.format])
+  }, [cfg.format, pokemon])
 
   useEffect(() => {
     if (!deckId) {
       setDeck(null)
       setValidation(null)
+      return
+    }
+    if (pokemon) {
+      void window.kard.pkm.decks.get(deckId).then(async (d) => {
+        if (!d) return
+        const asRoom = { ...d, format: cfg.format as PkmDeck['format'] }
+        setDeck(d)
+        setValidation(validatePkmDeck(asRoom, await getPkmCards(d.main.map((c) => c.oracleId))))
+        s.setDeck(d)
+      })
       return
     }
     window.kard.decks.get(deckId).then(async (d) => {
@@ -191,6 +223,8 @@ function Lobby() {
   }, [deckId])
 
   const allReady = s.players.length >= 2 && s.players.every((p) => p.deck && p.ready)
+  const profiles = usePlayerProfiles(s.players.map((p) => p.userId))
+  const viewProfile = useProfiles((x) => x.view)
 
   return (
     <div className="col" style={{ gap: 16 }}>
@@ -226,7 +260,12 @@ function Lobby() {
             {s.players.map((p) => (
               <div key={p.userId} className="lobby-player">
                 <span className={`presence-dot ${onlineIds.has(p.userId) ? 'on' : ''}`} title={onlineIds.has(p.userId) ? t('Conectado') : t('Desconectado')} />
+                <button className="avatar-btn" title={t('Ver perfil')} disabled={!profiles[p.userId]} onClick={() => viewProfile(p.userId)}>
+                  <Avatar url={profiles[p.userId]?.avatarUrl ?? null} name={profiles[p.userId]?.displayName || p.username} size={32} />
+                </button>
+                <span className="sb-color-dot" style={{ background: p.color ?? '#888' }} title={t('Cor no histórico')} />
                 <b className="grow">
+                  {profiles[p.userId]?.displayName && profiles[p.userId]?.displayName !== p.username ? `${profiles[p.userId]!.displayName} · ` : ''}
                   {p.username}
                   {p.userId === cfg.hostId && <span className="badge" style={{ marginLeft: 6 }}>{t('anfitrião')}</span>}
                   {p.userId === s.myId && <span className="muted small"> ({t('você')})</span>}
@@ -254,10 +293,14 @@ function Lobby() {
             <option value="">{t('Escolha...')}</option>
             {decks.map((d) => (
               <option key={d.id} value={d.id}>
-                {d.name} — {t(getFormat(d.format).name)} ({d.cardCount})
+                {d.name} — {pokemon ? t(getPkmFormat(d.format).name) : t(getFormat(d.format).name)} ({d.cardCount})
               </option>
             ))}
           </select>
+          <div className="field" style={{ marginTop: 10 }}>
+            {t('Sua cor no histórico')}
+            <ColorPicker value={me?.color ?? '#888'} onChange={(c) => s.setColor(c)} taken={s.players.filter((p) => p.userId !== s.myId).map((p) => p.color ?? '')} />
+          </div>
           {deck && validation && (
             <div style={{ marginTop: 8 }}>
               {validation.valid ? (
@@ -280,20 +323,17 @@ function Lobby() {
             </button>
             {host && (
               <>
-                <button className="btn primary" disabled={!allReady || s.started} onClick={() => void s.startGame(useAi && aiAvailable)}>
+                <button className="btn primary" disabled={!allReady || s.started} onClick={() => void s.startGame()}>
                   ⚔ {t('Começar partida')}
                 </button>
-                {aiAvailable && (
-                  <label className="check small">
-                    <input type="checkbox" checked={useAi} onChange={(e) => setUseAi(e.target.checked)} /> {t('Usar o Juiz IA (com a sua chave)')}
-                  </label>
-                )}
               </>
             )}
           </div>
           {!host && <div className="small muted" style={{ marginTop: 8 }}>{t('O anfitrião começa a partida quando todos estiverem prontos.')}</div>}
         </div>
       </div>
+
+      {!s.started && <InviteFriendsPanel roomCode={cfg.code} seatedIds={s.players.map((p) => p.userId)} full={s.players.length >= cfg.maxPlayers} />}
 
       <div className="panel">
         <h3>{t('Conversa')}</h3>

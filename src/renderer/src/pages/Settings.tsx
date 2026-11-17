@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useApp } from '../store'
-import { LANGUAGES, type ClaudeModel, type LangCode } from '@shared/types'
+import { LANGUAGES, type LangCode } from '@shared/types'
 import { playmatImageUrl } from '@shared/api'
+import { PkmLayoutEditor } from '../pokemon/play/PkmLayoutEditor'
+import { normalizePkmLayout } from '@shared/types'
 import { UI_LANGUAGES, t, type UiLang } from '@shared/i18n'
 import {
   DEFAULT_BOARD_LAYOUT,
@@ -26,11 +28,6 @@ import {
   type MatZone
 } from '@shared/board'
 
-const MODELS: { id: ClaudeModel; label: string }[] = [
-  { id: 'claude-opus-5-5', label: 'Claude Opus 5.5 (mais preciso — padrão)' },
-  { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5 (equilíbrio)' },
-  { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5 (mais rápido e barato)' }
-]
 
 function MatLayoutEditor({ layout, onChange, image, dim }: { layout: MatLayout; onChange: (l: MatLayout) => void; image: string | null; dim: number }) {
   const [picked, setPicked] = useState<MatZone | null>(null)
@@ -154,9 +151,9 @@ export default function SettingsPage() {
   const settings = useApp((s) => s.settings)
   const save = useApp((s) => s.saveSettings)
   const toast = useApp((s) => s.toast)
-  const [key, setKey] = useState('')
   const [testing, setTesting] = useState(false)
   const [version, setVersion] = useState('')
+  const [tableTab, setTableTab] = useState<'mtg' | 'pokemon'>(useApp.getState().settings?.tcg === 'pokemon' ? 'pokemon' : 'mtg')
 
   useEffect(() => {
     window.kard.app.version().then(setVersion)
@@ -184,9 +181,9 @@ export default function SettingsPage() {
 
   const test = async () => {
     setTesting(true)
-    const r = await window.kard.judge.test()
+    const r = await window.kard.ai.complete({ system: 'Reply with a short greeting in Brazilian Portuguese.', user: 'Olá, juiz! Está funcionando?', maxTokens: 60 })
     setTesting(false)
-    toast(r.ok ? `✓ ${r.answer}` : t('Falha: {error}', { error: r.error ?? '' }), r.ok ? 'success' : 'error')
+    toast(r.ok ? `✓ ${r.text}` : t('Falha: {error}', { error: r.error ?? '' }), r.ok ? 'success' : 'error')
   }
 
   return (
@@ -226,72 +223,20 @@ export default function SettingsPage() {
       </div>
 
       <div className="panel" style={{ marginBottom: 16 }}>
-        <h3>⚖ {t('Juiz IA (Claude)')}</h3>
-        <div className="small muted" style={{ marginBottom: 12, lineHeight: 1.5 }}>
-          {t('Toda partida passa pelo juiz de regras local do Kard, que valida cada jogada, as etapas do turno, a pilha, o combate e as ações baseadas em estado. Com o Juiz IA ativado, o Claude também interpreta textos de cartas que o motor não reconhece automaticamente e responde dúvidas de regras durante o jogo. Requer uma chave de API da Anthropic (cobrança por uso na sua conta).')}
+        <h3>⚖ {t('Juiz IA e bot')}</h3>
+        <div className="small muted" style={{ marginBottom: 10, lineHeight: 1.5 }}>
+          {t('As partidas são manuais. Em qualquer linha do histórico, passe o mouse e clique em "Chamar o juiz": a IA analisa a jogada no contexto da partida e diz se ela é válida. No Teste de deck, o bot também é uma IA. A IA roda no servidor do Kard (não precisa de chave sua) e exige a conta logada e internet.')}
         </div>
-        <label className="check" style={{ marginBottom: 12 }}>
-          <input type="checkbox" checked={settings.aiJudgeEnabled} onChange={(e) => save({ aiJudgeEnabled: e.target.checked })} />
-          {t('Ativar Juiz IA nas partidas')}
-        </label>
-        <div className="row wrap" style={{ alignItems: 'flex-end' }}>
-          <label className="field grow">
-            {t('Chave da API da Anthropic')} {settings.hasApiKey && <span className="badge ok">{t('configurada')}</span>}
-            <input type="password" placeholder={settings.hasApiKey ? `•••••••• ${t('(deixe em branco para manter)')}` : 'sk-ant-...'} value={key} onChange={(e) => setKey(e.target.value)} />
-          </label>
-          <button
-            className="btn primary"
-            disabled={!key.trim()}
-            onClick={async () => {
-              await save({ apiKey: key.trim() })
-              setKey('')
-              toast(t('Chave salva (criptografada neste computador).'), 'success')
-            }}
-          >
-            {t('Salvar chave')}
-          </button>
-          {settings.hasApiKey && (
-            <button
-              className="btn danger"
-              onClick={async () => {
-                await save({ apiKey: null })
-                toast(t('Chave removida.'))
-              }}
-            >
-              {t('Remover')}
-            </button>
-          )}
-        </div>
-        <div className="row wrap" style={{ marginTop: 12, alignItems: 'flex-end' }}>
-          <label className="field" style={{ minWidth: 340 }}>
-            {t('Modelo')}
-            <select value={settings.aiModel} onChange={(e) => save({ aiModel: e.target.value as ClaudeModel })}>
-              {MODELS.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {t(m.label)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button className="btn" disabled={!settings.hasApiKey || testing} onClick={test}>
-            {testing ? t('Testando...') : t('Testar conexão')}
-          </button>
-        </div>
-        <div className="small muted" style={{ marginTop: 10 }}>
-          {t('A chave também pode vir da variável de ambiente ANTHROPIC_API_KEY. As requisições usam fallback automático do servidor caso o modelo recuse um pedido.')}
-        </div>
+        <button className="btn" disabled={testing} onClick={test}>
+          {testing ? t('Testando...') : t('Testar a IA')}
+        </button>
       </div>
-
       <div className="panel" style={{ marginBottom: 16 }}>
         <h3>{t('Partida')}</h3>
         <div className="col">
           <label className="check">
-            <input type="checkbox" checked={settings.autoPass} onChange={(e) => save({ autoPass: e.target.checked })} />
-            {t('Passar prioridade automaticamente quando não houver jogadas possíveis')}
-          </label>
-          <label className="check">
-            <input type="checkbox" checked={settings.stopAtEveryStep} onChange={(e) => save({ stopAtEveryStep: e.target.checked })} />
-            {t('Parar em todas as etapas (modo detalhado)')}
+            <input type="checkbox" checked={settings.drawAnimation !== false} onChange={(e) => save({ drawAnimation: e.target.checked })} />
+            {t('Animação ao comprar a carta do início do turno')}
           </label>
           <label className="check">
             <input type="checkbox" checked={settings.showCardText} onChange={(e) => save({ showCardText: e.target.checked })} />
@@ -315,17 +260,44 @@ export default function SettingsPage() {
       </div>
 
       <div className="panel" style={{ marginBottom: 16 }}>
-        <h3>Playmat</h3>
-        <div className="small muted" style={{ marginBottom: 10 }}>
-          {t('Escolha onde fica cada área do seu lado da mesa.')}
+        <h3>{t('Mesa de jogo e playmat')}</h3>
+        <div className="settings-tabs">
+          <button className={`btn sm ${tableTab === 'mtg' ? 'primary' : ''}`} onClick={() => setTableTab('mtg')}>
+            Magic: The Gathering
+          </button>
+          <button className={`btn sm ${tableTab === 'pokemon' ? 'primary' : ''}`} onClick={() => setTableTab('pokemon')}>
+            Pokémon TCG
+          </button>
         </div>
-        <MatLayoutEditor
-          layout={normalizeMatLayout(settings.matLayout)}
-          onChange={(matLayout) => save({ matLayout })}
-          image={settings.playmatImage}
-          dim={settings.playmatDim ?? 0.35}
-        />
+        {tableTab === 'mtg' ? (
+          <>
+            <div className="small muted" style={{ marginBottom: 10 }}>
+              {t('Escolha onde fica cada área do seu lado da mesa.')}
+            </div>
+            <MatLayoutEditor
+              layout={normalizeMatLayout(settings.matLayout)}
+              onChange={(matLayout) => save({ matLayout })}
+              image={settings.playmatImage}
+              dim={settings.playmatDim ?? 0.35}
+            />
+            <h4 style={{ margin: '16px 0 6px' }}>{t('Organização do campo de batalha')}</h4>
+            <div className="small muted" style={{ marginBottom: 10 }}>
+              {t('Onde cada tipo de permanente fica dentro da área Campo de batalha (terrenos ficam na área própria). A linha 1 é a mais próxima do centro da mesa. Use as setas para mudar a ordem ou a linha.')}
+            </div>
+            <BoardLayoutEditor layout={normalizeBoardLayout(settings.boardLayout)} onChange={(boardLayout) => save({ boardLayout })} />
+          </>
+        ) : (
+          <PkmLayoutEditor
+            layout={normalizePkmLayout(settings.pkmLayout)}
+            onChange={(pkmLayout) => save({ pkmLayout })}
+            image={settings.playmatImage ? playmatImageUrl(settings.playmatImage) : null}
+            dim={settings.playmatDim ?? 0.35}
+          />
+        )}
         <h4 style={{ margin: '16px 0 6px' }}>{t('Imagem do playmat')}</h4>
+        <div className="small muted" style={{ marginBottom: 6 }}>
+          {t('A mesma imagem vale para as mesas de Magic e de Pokémon. Nas partidas online, os outros jogadores veem o seu playmat.')}
+        </div>
         <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
           <button className="btn" onClick={() => playmatAction('choosePlaymat')}>
             🖼 {settings.playmatImage ? t('Trocar imagem…') : t('Escolher imagem…')}
@@ -351,13 +323,6 @@ export default function SettingsPage() {
         )}
       </div>
 
-      <div className="panel" style={{ marginBottom: 16 }}>
-        <h3>{t('Organização do campo de batalha')}</h3>
-        <div className="small muted" style={{ marginBottom: 10 }}>
-          {t('Onde cada tipo de permanente fica dentro da área Campo de batalha (terrenos ficam na área própria). A linha 1 é a mais próxima do centro da mesa. Use as setas para mudar a ordem ou a linha.')}
-        </div>
-        <BoardLayoutEditor layout={normalizeBoardLayout(settings.boardLayout)} onChange={(boardLayout) => save({ boardLayout })} />
-      </div>
 
       <div className="panel">
         <h3>{t('Sobre')}</h3>

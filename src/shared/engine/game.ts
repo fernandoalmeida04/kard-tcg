@@ -14,6 +14,7 @@ import {
   type CountExpr,
   type AttackTarget,
   type DamageTo,
+  type EngineIssueKind,
   type Effect,
   type EffectBlock,
   type GameCard,
@@ -127,6 +128,14 @@ export function log(state: GameState, kind: LogEntry['kind'], text: string, play
   if (state.log.length > 600) state.log.splice(0, state.log.length - 600)
 }
 
+/** Registra um problema do motor para o relatório (Configurações → Problemas do motor). */
+export function recordIssue(state: GameState, kind: EngineIssueKind, text: string, card?: string, context = state.log.slice(-6).map((e) => e.text)): void {
+  const issues = (state.issues ??= [])
+  issues.push({ kind, card, text: text.slice(0, 600), turn: state.turn, context })
+  state.issueSeq = (state.issueSeq ?? 0) + 1
+  if (issues.length > 300) issues.splice(0, issues.length - 300)
+}
+
 function pname(state: GameState, p: PlayerId): string {
   return state.players[p].name
 }
@@ -178,6 +187,7 @@ function parseFace(card: GameCard, face: number): ParsedCard {
 }
 
 function basePT(o: GameObject): { p: number; t: number } {
+  if (o.ptOverride) return { p: o.ptOverride.power, t: o.ptOverride.toughness }
   const f = faceOf(o)
   const ps = f?.power ?? o.card.power
   const ts = f?.toughness ?? o.card.toughness
@@ -187,6 +197,18 @@ function basePT(o: GameObject): { p: number; t: number } {
     return isNaN(n) ? 0 : n
   }
   return { p: num(ps), t: num(ts) }
+}
+
+/**
+ * Poder/resistência impressos com "*" que o motor não sabe calcular (regra não reconhecida e sem valor
+ * definido à mão). Nesses casos o motor não pode matar a criatura por "resistência 0".
+ */
+export function hasUnknownPT(o: GameObject): boolean {
+  if (o.ptOverride || o.parsed.ptFrom) return false
+  const f = faceOf(o)
+  const ps = f?.power ?? o.card.power ?? ''
+  const ts = f?.toughness ?? o.card.toughness ?? ''
+  return ps.includes('*') || ts.includes('*')
 }
 
 function attachedTo(state: GameState, id: string): GameObject[] {
@@ -224,6 +246,19 @@ export function countFor(state: GameState, p: PlayerId, ce: CountExpr, selfId?: 
     case 'plains':
       return mine().filter((x) => hasType(x, 'Plains')).length
   }
+  if (ce.startsWith('devotion:')) return devotion(state, p, ce.slice(9))
+  return 0
+}
+
+/** Devoção (CR 700.5): símbolos de mana das cores indicadas nos custos das permanentes que o jogador controla. Híbridos contam uma vez. */
+export function devotion(state: GameState, p: PlayerId, colors: string): number {
+  let n = 0
+  for (const id of state.battlefield) {
+    const o = state.objects[id]
+    if (!o || o.controller !== p) continue
+    for (const sym of manaCostOf(o).match(/\{[^}]+\}/g) ?? []) if ([...colors].some((c) => sym.includes(c))) n++
+  }
+  return n
 }
 
 function anthemsFor(state: GameState, o: GameObject): { power: number; toughness: number; keywords: string[] } {
@@ -457,7 +492,7 @@ export function createGame(setup: GameSetup): GameState {
   state.activePlayer = state.firstPlayer
   log(state, 'turn', t('Partida iniciada ({format}). Sorteio: {name} começa jogando.', { format: setup.format, name: pname(state, state.firstPlayer) }))
   for (let p = 0; p < n; p++) drawCards(state, p, HAND_SIZE, true)
-  // mulligans: cada jogador decide em ordem de turno, começando pelo primeiro jogador
+  // mulligans: todos decidem ao mesmo tempo (cada um resolve a própria escolha, em qualquer ordem)
   for (let i = 0; i < n; i++) state.choices.push({ kind: 'mulligan', player: (state.firstPlayer + i) % n })
   return state
 }
@@ -561,6 +596,8 @@ export function moveObject(state: GameState, id: string, to: GameObject['zone'],
   o.playableBy = undefined
   o.playableUntil = undefined
   o.chosenType = undefined
+  o.ptOverride = undefined
+  o.ptWarned = undefined
   const pl = state.players[o.owner]
   switch (dest) {
     case 'library':
@@ -701,6 +738,7 @@ function enterBattlefield(state: GameState, o: GameObject, opts: MoveOpts): void
   }
   if (o.parsed.unsupported.length && !o.isToken) {
     log(state, 'judge', t('Habilidades de {name} não automatizadas pelo motor: "{text}". Use ajustes manuais se necessário.', { name: objName(state, o.id), text: o.parsed.unsupported.join(' / ') }))
+    recordIssue(state, 'unparsed', o.parsed.unsupported.join(' / '), o.card.name)
   }
 }
 
@@ -1894,6 +1932,8 @@ function continueResolution(state: GameState): void {
   if (r.item.block.unsupported.length && !r.aiDone) {
     r.aiDone = true
     const text = r.item.block.unsupported.join(' ')
+    const srcObj = state.objects[r.item.sourceId ?? r.item.objectId ?? '']
+    recordIssue(state, state.aiEnabled ? 'aiJudge' : 'unparsed', text, srcObj?.card.name ?? r.item.sourceName)
     if (state.aiEnabled) {
       state.pendingAI = { item: r.item, text }
       log(state, 'ai', t('Juiz IA consultado para resolver: "{text}"', { text }), r.item.controller)
@@ -1960,6 +2000,19 @@ function checkSBA(state: GameState): void {
       }
       if (isCreature(o)) {
         const tough = toughness(state, o)
+        if (hasUnknownPT(o)) {
+          // resistência desconhecida: não aplica a regra de "resistência 0" com um valor que o motor não entendeu
+          if (!o.ptWarned) {
+            o.ptWarned = true
+            log(state, 'judge', t('O poder/resistência de {name} depende de uma regra que o motor ainda não entende. Defina os valores com o botão direito → Definir poder/resistência.', { name: objName(state, id) }))
+            recordIssue(state, 'unknownPT', `P/T ${faceOf(o)?.power ?? o.card.power}/${faceOf(o)?.toughness ?? o.card.toughness}`, o.card.name)
+          }
+          if (o.damage > 0 && o.damage >= tough && !hasKw(state, o, 'indestructible')) {
+            if (!tryRegenerate(state, o)) moveObject(state, id, 'graveyard')
+            changed = true
+          }
+          continue
+        }
         if (tough <= 0) {
           log(state, 'judge', t('{name} tem resistência {n} e vai para o cemitério.', { name: objName(state, id), n: tough }))
           moveObject(state, id, 'graveyard')
@@ -2432,8 +2485,8 @@ function damageStep(state: GameState, phase: 'first' | 'regular' | 'all'): void 
 // Escolhas pendentes
 // ============================================================
 
-function finishChoice(state: GameState): void {
-  state.choices.shift()
+function finishChoice(state: GameState, idx = 0): void {
+  state.choices.splice(idx, 1)
   if (state.choices.length) return
   if (state.step === 'mulligan') {
     startGameAfterMulligans(state)
@@ -2447,7 +2500,9 @@ function finishChoice(state: GameState): void {
 }
 
 function applyChoice(state: GameState, p: PlayerId, action: Action): string | null {
-  const ch = state.choices[0]
+  // na fase de mulligan as escolhas são simultâneas: cada jogador resolve a sua
+  const idx = state.step === 'mulligan' ? Math.max(0, state.choices.findIndex((c) => c.player === p)) : 0
+  const ch = state.choices[idx]
   if (!ch) return t('Não há escolha pendente.')
   if (ch.player !== p) return t('Aguarde a escolha do outro jogador.')
   const pl = state.players[p]
@@ -2459,10 +2514,10 @@ function applyChoice(state: GameState, p: PlayerId, action: Action): string | nu
         const bottom = Math.max(0, pl.mulligans - free)
         log(state, 'action', pl.mulligans ? t('{name} mantém a mão após {n} mulligan(s).', { name: pl.name, n: pl.mulligans }) : t('{name} mantém a mão.', { name: pl.name }), p)
         if (bottom > 0 && pl.hand.length > 0) {
-          state.choices[0] = { kind: 'bottom', player: p, count: Math.min(bottom, pl.hand.length) }
+          state.choices[idx] = { kind: 'bottom', player: p, count: Math.min(bottom, pl.hand.length) }
           return null
         }
-        finishChoice(state)
+        finishChoice(state, idx)
         return null
       }
       if (action.t === 'mulligan') {
@@ -2523,7 +2578,7 @@ function applyChoice(state: GameState, p: PlayerId, action: Action): string | nu
         }
         log(state, 'action', t(ch.surveil ? '{name} vigia {n}: {top} no topo, {other} no cemitério.' : '{name} faz vidência {n}: {top} no topo, {other} no fundo.', { name: pl.name, n: ch.cards.length, top: ch.cards.length - ids.length, other: ids.length }), p)
       }
-      finishChoice(state)
+      finishChoice(state, idx)
       return null
     }
     case 'pickDiscard': {
@@ -2532,7 +2587,7 @@ function applyChoice(state: GameState, p: PlayerId, action: Action): string | nu
       if (action.ids.length !== 1 || !ch.candidates.includes(id)) return t('Escolha uma carta válida da mão revelada.')
       log(state, 'action', t('{player} descarta {name}.', { player: pname(state, ch.target), name: objName(state, id) }), ch.target)
       moveObject(state, id, 'graveyard')
-      finishChoice(state)
+      finishChoice(state, idx)
       return null
     }
     case 'returnOwn': {
@@ -2543,7 +2598,7 @@ function applyChoice(state: GameState, p: PlayerId, action: Action): string | nu
         log(state, 'action', t('{player} devolve {name} para a mão.', { player: pl.name, name: objName(state, id) }), p)
         moveObject(state, id, 'hand')
       }
-      finishChoice(state)
+      finishChoice(state, idx)
       return null
     }
     case 'handLand': {
@@ -2554,7 +2609,7 @@ function applyChoice(state: GameState, p: PlayerId, action: Action): string | nu
         log(state, 'action', t('{player} coloca {name} no campo de batalha.', { player: pl.name, name: objName(state, id) }), p)
         moveObject(state, id, 'battlefield', { controller: p })
       }
-      finishChoice(state)
+      finishChoice(state, idx)
       return null
     }
     case 'dig': {
@@ -2569,7 +2624,7 @@ function applyChoice(state: GameState, p: PlayerId, action: Action): string | nu
       shuffleArray(state, rest)
       for (const id of rest) moveObject(state, id, ch.rest === 'graveyard' ? 'graveyard' : 'library', { bottom: true })
       log(state, 'action', ch.rest === 'graveyard' ? t('{n} carta(s) restante(s) vão para o cemitério.', { n: rest.length }) : t('{n} carta(s) restante(s) vão para o fundo do grimório.', { n: rest.length }), p)
-      finishChoice(state)
+      finishChoice(state, idx)
       return null
     }
     case 'mode': {
@@ -2581,12 +2636,12 @@ function applyChoice(state: GameState, p: PlayerId, action: Action): string | nu
       log(state, 'action', t('{name} escolhe o modo: "{mode}".', { name: pl.name, mode: m.text }), p)
       if (trig.ability.targets.length === 0) {
         pushTriggerToStack(state, trig, [])
-        finishChoice(state)
+        finishChoice(state, idx)
         return null
       }
       const anyLegal = trig.ability.targets.every((s) => s.optional || targetCandidates(state, p, s, trig.sourceId).length > 0)
       if (!anyLegal) return t('Esse modo não tem alvos válidos.')
-      state.choices[0] = { kind: 'targets', player: p, trigger: trig }
+      state.choices[idx] = { kind: 'targets', player: p, trigger: trig }
       return null
     }
     case 'targets': {
@@ -2594,7 +2649,7 @@ function applyChoice(state: GameState, p: PlayerId, action: Action): string | nu
       const err = validateTargets(state, p, ch.trigger.ability.targets, action.targets, ch.trigger.sourceId)
       if (err) return err
       pushTriggerToStack(state, ch.trigger, action.targets)
-      finishChoice(state)
+      finishChoice(state, idx)
       return null
     }
   }
@@ -2709,7 +2764,26 @@ function applyAIOps(state: GameState, ops: JudgeOp[], explanation: string): void
 // ============================================================
 
 function applyManual(state: GameState, p: PlayerId, op: ManualOp): string | null {
+  const err = applyManualOp(state, p, op)
+  if (!err) {
+    // ajuste manual = o estado estava errado; guarda o que aconteceu antes para descobrir a causa
+    const id = 'id' in op ? op.id : undefined
+    const card = id ? state.objects[id]?.card.name : undefined
+    recordIssue(state, 'manual', state.log[state.log.length - 1]?.text ?? op.op, card, state.log.slice(-9, -1).map((e) => e.text))
+  }
+  return err
+}
+
+function applyManualOp(state: GameState, p: PlayerId, op: ManualOp): string | null {
   switch (op.op) {
+    case 'setPT': {
+      const o = state.objects[op.id]
+      if (!o || o.zone !== 'battlefield') return t('Objeto inválido.')
+      if (!Number.isInteger(op.power) || !Number.isInteger(op.toughness) || op.power < 0 || op.toughness < 0 || op.power > 999 || op.toughness > 999) return t('Valores inválidos.')
+      o.ptOverride = { power: op.power, toughness: op.toughness }
+      log(state, 'manual', t('Ajuste manual: poder/resistência base de {name} definidos como {p}/{t}.', { name: objName(state, op.id), p: op.power, t: op.toughness }), p)
+      return null
+    }
     case 'life':
       if (!state.players[op.player]) return t('Jogador inválido.')
       state.players[op.player].life += op.delta
@@ -2777,9 +2851,15 @@ function applyManual(state: GameState, p: PlayerId, op: ManualOp): string | null
 
 export function performAction(input: GameState, p: PlayerId, action: Action): ActionResult {
   const state = clone(input)
-  const err = apply(state, p, action)
-  if (err) return { state: input, error: err }
-  settle(state)
+  try {
+    const err = apply(state, p, action)
+    if (err) return { state: input, error: err }
+    settle(state)
+  } catch (e) {
+    // erro interno: a jogada é desfeita (o estado anterior continua valendo) e a partida segue
+    const msg = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e)
+    return { state: input, error: t('Erro interno do motor ao processar a jogada; ela foi desfeita. O problema foi registrado no relatório do motor.'), crash: msg.slice(0, 3000) }
+  }
   return { state }
 }
 
@@ -2805,7 +2885,11 @@ function apply(state: GameState, p: PlayerId, action: Action): string | null {
     case 'aiSkip': {
       if (!state.pendingAI) return t('Nenhum efeito aguardando o Juiz IA.')
       if (action.t === 'aiResolve') applyAIOps(state, action.ops, action.explanation)
-      else log(state, 'judge', t('Juiz IA indisponível ({reason}). Parte do efeito de {name} não foi aplicada; use ajustes manuais se necessário.', { reason: action.reason, name: state.pendingAI.item.sourceName }))
+      else {
+        log(state, 'judge', t('Juiz IA indisponível ({reason}). Parte do efeito de {name} não foi aplicada; use ajustes manuais se necessário.', { reason: action.reason, name: state.pendingAI.item.sourceName }))
+        const it = state.pendingAI.item
+        recordIssue(state, 'aiFailed', `${state.pendingAI.text} — ${action.reason}`, state.objects[it.sourceId ?? it.objectId ?? '']?.card.name ?? it.sourceName)
+      }
       state.pendingAI = null
       if (state.choices.length) return null
       if (state.resolving) {
@@ -3082,8 +3166,17 @@ function activateLogText(player: string, name: string, label: string, targets: s
 // Consultas para a interface e para o bot
 // ============================================================
 
-export function currentChoice(state: GameState): PendingChoice | null {
+/** Escolha pendente. Com `p`, na fase de mulligan (simultânea), devolve a escolha desse jogador. */
+export function currentChoice(state: GameState, p?: PlayerId): PendingChoice | null {
+  if (p !== undefined && state.step === 'mulligan') return state.choices.find((c) => c.player === p) ?? null
   return state.choices[0] ?? null
+}
+
+/** O jogador precisa agir agora? (na fase de mulligan, vários jogadores agem ao mesmo tempo) */
+export function canAct(state: GameState, p: PlayerId): boolean {
+  if (state.winner !== null) return false
+  if (state.step === 'mulligan') return state.choices.some((c) => c.player === p)
+  return actingPlayer(state) === p
 }
 
 /** Quem precisa agir agora (prioridade, declaração ou escolha). */

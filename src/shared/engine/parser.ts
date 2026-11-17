@@ -1170,6 +1170,10 @@ function countExprOf(phrase: string): CountExpr | null {
     [/^plains you control$/, 'plains']
   ]
   for (const [re, ce] of map) if (re.test(p)) return ce
+  // "your devotion to white" / "your devotion to white and blue"
+  const COLOR: Record<string, string> = { white: 'W', blue: 'U', black: 'B', red: 'R', green: 'G' }
+  const d = p.match(/^your devotion to (white|blue|black|red|green)(?: and (white|blue|black|red|green))?$/)
+  if (d) return `devotion:${COLOR[d[1]]}${d[2] ? COLOR[d[2]] : ''}`
   return null
 }
 

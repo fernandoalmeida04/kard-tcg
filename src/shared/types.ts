@@ -271,6 +271,140 @@ export interface AuthUser {
   username: string | null
   /** 'email' ou 'google'. */
   provider: string
+  /** Foto de perfil (URL pública no Supabase Storage). */
+  avatarUrl?: string | null
+  /** Nome de exibição escolhido no perfil. */
+  displayName?: string | null
+  /** Administrador do app (vê o painel administrativo; conferido de novo no servidor). */
+  isAdmin?: boolean
+  /** Conta suspensa por um administrador. */
+  banned?: boolean
+  banReason?: string | null
+  /** Fim da suspensão (null = permanente). */
+  banUntil?: string | null
+}
+
+// ---------------- Painel administrativo ----------------
+
+export interface AdminStats {
+  users: number
+  new7d: number
+  active7d: number
+  admins: number
+  banned: number
+  aiToday: number
+  aiUsersToday: number
+  ai7d: number
+  /** Limite diário definido no painel (null = o padrão da Edge Function). */
+  aiLimit: number | null
+  friendships: number
+}
+
+export interface AdminUser {
+  id: string
+  username: string | null
+  displayName: string | null
+  avatarUrl: string | null
+  email: string
+  createdAt: string
+  lastSignInAt: string | null
+  isAdmin: boolean
+  banned: boolean
+  banReason: string | null
+  banUntil: string | null
+  aiToday: number
+  ai7d: number
+}
+
+export interface AdminLogEntry {
+  id: number
+  createdAt: string
+  adminName: string
+  action: string
+  targetName: string | null
+  details: Record<string, unknown> | null
+}
+
+export interface Announcement {
+  text: string
+  level: 'info' | 'warning'
+  updatedAt?: string
+}
+
+export interface AdminResult<T = void> {
+  ok: boolean
+  data?: T
+  error?: string
+}
+
+/** Informações editáveis em "Meu Perfil". */
+export interface ProfileInfo {
+  username: string | null
+  displayName: string
+  bio: string
+  location: string
+  /** TCG favorito: define quais campos específicos aparecem (ver shared/profileFields.ts). */
+  favoriteTcg: TcgId | ''
+  /** Campos específicos de cada TCG (guardados por jogo: trocar o favorito não apaga os outros). */
+  tcgInfo: Partial<Record<TcgId, Record<string, string | number>>>
+  avatarUrl: string | null
+  /** Data de criação da conta (ISO). */
+  memberSince: string | null
+}
+
+// ---------------- Amigos ----------------
+
+export interface FriendEntry {
+  userId: string
+  /** Data do pedido de amizade. */
+  since: string
+  profile: PublicProfile
+}
+
+export interface FriendsState {
+  friends: FriendEntry[]
+  /** Pedidos recebidos (esperando minha resposta). */
+  incoming: FriendEntry[]
+  /** Pedidos que enviei. */
+  outgoing: FriendEntry[]
+  /** Amigos online agora (ids). */
+  online: string[]
+  error?: string
+}
+
+export interface UserSearchResult {
+  userId: string
+  username: string
+  displayName: string | null
+  avatarUrl: string | null
+}
+
+export interface GameInvite {
+  id: number
+  fromUser: string
+  roomCode: string
+  createdAt: string
+}
+
+export interface SocialResult {
+  ok: boolean
+  error?: string
+  /** send_friend_request: 'requested' | 'accepted' | 'already' */
+  status?: string
+}
+
+/** Perfil visto pelos outros jogadores (lobby/mesa online). */
+export interface PublicProfile extends Omit<ProfileInfo, 'username'> {
+  userId: string
+  username: string | null
+}
+
+export interface ProfileResult {
+  ok: boolean
+  error?: string
+  profile?: ProfileInfo
+  /** Escolha de foto cancelada pelo usuário. */
+  canceled?: boolean
 }
 
 export interface AuthResult {
@@ -309,6 +443,32 @@ export interface Settings {
   playmatDim: number
   /** Usar a imagem também no lado do oponente. */
   playmatBoth: boolean
+  /** Layout do lado do jogador na mesa de Pokémon. */
+  pkmLayout: PkmMatLayout
+  /** Animação da carta saindo do deck para a mão na compra do início do turno. */
+  drawAnimation: boolean
+  /** Enviar os problemas do motor (com os nomes dos jogadores trocados por "Jogador N") para o desenvolvedor corrigir. */
+  shareEngineIssues: boolean
+}
+
+/** Layout da mesa de Pokémon (o lado do oponente é espelhado na vertical). */
+export interface PkmMatLayout {
+  /** Lado da coluna de Deck e Descarte. */
+  zones: 'left' | 'right'
+  /** Prêmios junto do Deck/Descarte ou no lado oposto. */
+  prizes: 'withZones' | 'opposite'
+  /** Banco atrás do Ativo (longe do centro) ou na frente (perto do centro). */
+  bench: 'back' | 'front'
+}
+
+export const DEFAULT_PKM_LAYOUT: PkmMatLayout = { zones: 'left', prizes: 'withZones', bench: 'back' }
+
+export function normalizePkmLayout(l: Partial<PkmMatLayout> | undefined | null): PkmMatLayout {
+  return {
+    zones: l?.zones === 'right' ? 'right' : 'left',
+    prizes: l?.prizes === 'opposite' ? 'opposite' : 'withZones',
+    bench: l?.bench === 'front' ? 'front' : 'back'
+  }
 }
 
 export interface SettingsUpdate extends Partial<Omit<Settings, 'hasApiKey' | 'playmatImage'>> {

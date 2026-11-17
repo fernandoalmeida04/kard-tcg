@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { DbStatus, DownloadProgress, Settings, SettingsUpdate } from '@shared/types'
 
-export type Page = 'home' | 'database' | 'collection' | 'decks' | 'online' | 'editor' | 'play' | 'settings'
+export type Page = 'home' | 'database' | 'collection' | 'decks' | 'online' | 'editor' | 'play' | 'settings' | 'friends' | 'admin'
 
 export interface Toast {
   id: number

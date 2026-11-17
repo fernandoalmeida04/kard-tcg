@@ -117,6 +117,108 @@ Contas criadas pelo Google começam sem nome de usuário; o app pede para escolh
 4. Confira em **Authentication → Users** (a conta) e **Table Editor → profiles** (o nome de usuário).
 5. Saia pelo menu da conta e entre de novo com e-mail/senha; teste **Entrar com Google**.
 
+## 6.1 Meu Perfil (foto e informações)
+
+Clicando no nome da conta → **👤 Meu Perfil**, cada pessoa escolhe uma foto e preenche nome de exibição, localização e uma bio. Ao escolher o **TCG favorito** (Magic, Pokémon ou Yu-Gi-Oh!) aparecem campos daquele jogo (ex.: cores e carta favorita no Magic; Pokémon e tipo favorito no Pokémon; monstro, arquétipo e atributo no Yu-Gi-Oh!; formato favorito e "jogando desde" nos três). Os campos de cada jogo ficam guardados separadamente em `tcg_info` (trocar o favorito não apaga os outros); a lista de campos fica em `src/shared/profileFields.ts`.
+
+- Rode o `supabase/schema.sql` **atualizado**: ele adiciona as colunas do perfil em `profiles` e cria o bucket público **avatars** no Storage, onde cada pessoa só envia/apaga arquivos na própria pasta.
+- O app recorta a foto no centro e reduz para 256×256 (JPEG) antes de enviar, e apaga a foto antiga ao trocar.
+- O perfil (foto, nomes, bio, TCG favorito) é visível para **quem está logado**: aparece no lobby e na mesa online, e clicando na foto abre o cartão de perfil. O e-mail não fica em `profiles`, então não é exposto. Só a própria pessoa altera o próprio perfil.
+
+## 6.2 Amigos e convites para partidas
+
+Menu **👥 Amigos** na barra lateral (mostra quantos amigos estão online e os pedidos pendentes): procurar jogadores pelo nome, enviar/aceitar/recusar pedidos, ver o perfil e desfazer amizades. No lobby de uma mesa aparece **Convidar amigos**: o amigo recebe um aviso na hora, em qualquer tela do app, com o botão **Entrar na mesa** (sem digitar o código).
+
+- Rode o `supabase/schema.sql` **atualizado**: ele cria `friendships` e `game_invites`, as funções (`search_users`, `send_friend_request`, `respond_friend_request`, `remove_friend`, `invite_friend`, `dismiss_invite`, `are_friends`) e adiciona as duas tabelas ao **Realtime** (publicação `supabase_realtime`), que é o que faz pedidos e convites chegarem na hora.
+- Todas as alterações passam pelas funções (validadas no servidor): só dá para convidar quem é amigo, e cada pessoa só lê as próprias amizades e convites.
+- "Online" vem de um canal de presença do Realtime (`kard-presence`), onde cada jogador logado aparece pelo id da conta.
+- Convites valem por 15 minutos (quem abrir o app nesse tempo ainda vê o convite).
+
+## 7. Relatório de problemas do motor (de todos os jogadores)
+
+Os apps dos jogadores enviam para o Supabase os problemas do motor de regras que acontecem nas partidas (texto de carta não entendido, erros internos, ajustes manuais, relatos). Assim você corrige problemas de partidas em que não estava.
+
+1. Rode o `supabase/schema.sql` **atualizado** de novo (SQL Editor → New query → cole tudo → Run). Ele cria `engine_issues`, `engine_issue_reporters`, `app_admins` e as funções `report_engine_issues`, `list_engine_issues` e `is_app_admin`.
+2. Torne a sua conta administradora (troque pelo e-mail da sua conta no Kard) e rode:
+   ```sql
+   insert into public.app_admins (user_id) select id from auth.users where email = 'seu@email.com';
+   ```
+3. Reinicie o app logado nessa conta → **Configurações → Problemas do motor** → aba **🌐 Todos os jogadores**.
+4. **📋 Copiar relatório** e cole na conversa com quem vai corrigir o motor. Depois de publicar a versão corrigida, **Remover corrigidos** apaga do Supabase o que o motor já entende.
+
+Como funciona:
+- Só jogadores **logados** enviam. Sem login ou sem internet, os problemas ficam numa fila e vão na próxima vez.
+- Os jogadores só conseguem **enviar** (pela função, com limite de tamanho); ninguém além dos administradores lê a tabela.
+- Os nomes dos jogadores são trocados por "Jogador 1", "Jogador 2"... Cada um pode desligar o envio em Configurações.
+- Problemas iguais são agrupados: a tabela guarda o contador, quantos jogadores diferentes viram e até 3 exemplos com as últimas jogadas.
+
+## 8. Juiz IA e bot (Edge Function "ai")
+
+As partidas são manuais. O **Juiz IA** (botão "Chamar o juiz" em cada linha do histórico) e o **bot do Teste de deck** usam uma IA que fica **no servidor**, não no computador de cada jogador: o app chama a Edge Function `ai` do Supabase, e só ela conhece a chave do provedor. Assim ninguém consegue tirar a chave de dentro do instalador.
+
+**Provedor recomendado (grátis): Groq, modelo `openai/gpt-oss-120b`** — cerca de 1.000 consultas/dia e 30/minuto no plano gratuito (os limites mudam; confira em console.groq.com/settings/limits). O código aceita qualquer provedor compatível com a API da OpenAI (veja "Trocar de provedor").
+
+1. **Chave do Groq:** crie uma conta grátis em https://console.groq.com → **API Keys → Create API Key** → copie (começa com `gsk_`).
+2. **Banco:** rode o `supabase/schema.sql` atualizado (cria a tabela `ai_usage`, o limite diário por jogador).
+3. **Publicar a função** (no terminal, na pasta do projeto):
+   ```bash
+   npx supabase login
+   npx supabase link --project-ref SEU-PROJECT-REF      # o "ref" está na URL: https://SEU-PROJECT-REF.supabase.co
+   npx supabase secrets set AI_API_KEY=gsk_sua_chave
+   npx supabase functions deploy ai
+   ```
+   Sem terminal: Supabase → **Edge Functions → Deploy a new function → Via Editor**, nome `ai`, cole o conteúdo de `supabase/functions/ai/index.ts` e publique; depois **Edge Functions → Secrets** → adicione `AI_API_KEY`.
+4. **Testar:** no app, logado → **Configurações → Juiz IA e bot → Testar a IA**.
+
+Segredos opcionais da função:
+
+| Segredo | Padrão | Para quê |
+|---|---|---|
+| `AI_MODEL` | `openai/gpt-oss-120b` | modelo usado |
+| `AI_BASE_URL` | `https://api.groq.com/openai/v1` | provedor |
+| `AI_DAILY_LIMIT` | `80` | consultas por jogador por dia (protege a cota grátis) |
+
+**Trocar de provedor** (só os segredos mudam, o código é o mesmo):
+
+| Provedor | `AI_BASE_URL` | `AI_MODEL` (exemplo) |
+|---|---|---|
+| Groq (recomendado) | `https://api.groq.com/openai/v1` | `openai/gpt-oss-120b` |
+| Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.5-flash-lite` (o Flash grátis tem só ~20 consultas/dia) |
+| OpenRouter | `https://openrouter.ai/api/v1` | um modelo terminado em `:free` |
+| OpenAI (pago) | `https://api.openai.com/v1` | `gpt-4.1-mini` |
+
+**Só em desenvolvimento** dá para pular a função e chamar o provedor direto, pondo no `.env`: `MAIN_VITE_AI_API_KEY=gsk_...` (veja `.env.example`). **Nunca gere um instalador com essa variável preenchida** — a chave iria junto e qualquer um poderia usá-la.
+
+## 9. Administradores e painel administrativo
+
+O app tem um **painel administrativo** (menu lateral → 🛡 **Administração**, ou no menu da sua conta) que só aparece para administradores. Toda função do painel confere no servidor se quem chama é administrador — esconder o botão é só conveniência; a segurança está no banco.
+
+**Ativar:**
+
+1. Rode o `supabase/schema.sql` atualizado (SQL Editor → cole tudo → **Run**). Pode rodar de novo sem problema.
+2. Nomeie o **primeiro** administrador (troque o e-mail pelo da sua conta):
+   ```sql
+   insert into public.app_admins (user_id) select id from auth.users where email = 'seu@email.com';
+   ```
+3. Reenvie a Edge Function da IA (ela passa a respeitar suspensões e o limite definido no painel):
+   ```bash
+   npx supabase functions deploy ai
+   ```
+4. Saia e entre de novo na conta no app (ou reinicie o app).
+
+**O que o painel faz:**
+
+| Aba | O que tem |
+| --- | --- |
+| Visão geral | Contas, novas e ativas nos últimos 7 dias, amizades, suspensas, consultas à IA (hoje e 7 dias) |
+| Contas | Busca por nome/usuário/e-mail; **suspender** (1, 7, 30 dias ou permanente, com motivo que o jogador vê), remover suspensão, **tornar/tirar admin**, zerar a IA do dia |
+| Avisos e IA | **Aviso para todos** (faixa no topo do app; informação ou alerta) e o **limite diário da IA** por jogador, sem precisar reenviar a Edge Function |
+| Registro | Quem fez o quê e quando (suspensões, cargos, configurações) |
+
+**Regras de segurança:** o app nunca fica sem administrador; ninguém bane a si mesmo; um administrador precisa perder o cargo antes de ser suspenso. Administradores veem o e-mail das contas — nomeie só pessoas de confiança.
+
+**Conta suspensa:** não usa a IA (a Edge Function recusa), não aparece na busca de jogadores, não pede amizade nem convida, e o app bloqueia o jogo online e os amigos. Coleção, decks e teste de deck continuam funcionando. Observação: o jogo online usa o Realtime direto entre os jogadores; o bloqueio do online é feito pelo app.
+
 ## Problemas comuns
 
 | Sintoma | Causa provável |
@@ -127,6 +229,14 @@ Contas criadas pelo Google começam sem nome de usuário; o app pede para escolh
 | Google abre mas dá erro de redirect | Falta `http://127.0.0.1:53682/auth/callback` nas Redirect URLs do Supabase, ou o URI do Google não é o "Callback URL" do Supabase. |
 | Google diz "acesso bloqueado" | App em modo "Testes" no Google e seu e-mail não está em **Usuários de teste**. |
 | Erro ao checar nome de usuário | O `schema.sql` não foi executado (falta a função `username_available`). |
+| "O perfil ainda não foi configurado no Supabase" | O `schema.sql` atualizado não foi executado (faltam as colunas do perfil ou o bucket `avatars`). |
+| "O sistema de amigos ainda não foi configurado" | O `schema.sql` atualizado não foi executado (faltam `friendships`/`game_invites` e as funções). |
+| Pedidos/convites só aparecem depois de um tempo | As tabelas não estão na publicação do Realtime: rode o `schema.sql` de novo, ou em **Database → Publications → supabase_realtime** marque `friendships` e `game_invites`. |
+| "A Edge Function \"ai\" ainda não foi publicada" | Falta o passo 8.3 (`npx supabase functions deploy ai`). |
+| "AI_API_KEY não configurada" | Falta o segredo `AI_API_KEY` da função (passo 8.3). |
+| "Limite diário de N consultas" | O jogador passou do `AI_DAILY_LIMIT` (padrão 80/dia). |
+| Aba "Todos os jogadores" não aparece | Sua conta não está em `app_admins` (passo 7.2), ou o app não foi reiniciado. |
+| Problemas não chegam ao Supabase | O `schema.sql` atualizado não foi executado (falta `report_engine_issues`), o jogador não está logado ou desligou o envio. |
 
 ## Próxima etapa
 

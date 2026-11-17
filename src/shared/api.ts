@@ -1,4 +1,9 @@
 import type {
+  AdminLogEntry,
+  AdminResult,
+  AdminStats,
+  AdminUser,
+  Announcement,
   CardData,
   CardDetails,
   CardSearchQuery,
@@ -14,6 +19,13 @@ import type {
   JudgeEffectRequest,
   JudgeEffectResponse,
   JudgeQuestionRequest,
+  ProfileInfo,
+  ProfileResult,
+  FriendsState,
+  GameInvite,
+  SocialResult,
+  UserSearchResult,
+  PublicProfile,
   LangCode,
   NameResolution,
   Printing,
@@ -21,6 +33,7 @@ import type {
   Settings,
   SettingsUpdate
 } from './types.ts'
+import type { IssueInput, StoredIssue } from './engineIssues.ts'
 import type {
   PkmCard,
   PkmCardDetails,
@@ -71,6 +84,8 @@ export interface KardApi {
     /** Abre o seletor de arquivo para a imagem do playmat. */
     choosePlaymat(): Promise<Settings>
     clearPlaymat(): Promise<Settings>
+    /** Playmat atual reduzido (JPEG em data URL) para mostrar aos outros jogadores online; null se não houver. */
+    playmatShareData(): Promise<string | null>
   }
   db: {
     status(): Promise<DbStatus>
@@ -157,11 +172,68 @@ export interface KardApi {
     signInWithGoogle(): Promise<AuthResult>
     setUsername(username: string): Promise<AuthResult>
     signOut(): Promise<void>
+    /** "Meu Perfil" */
+    getProfile(): Promise<ProfileResult>
+    saveProfile(info: Omit<ProfileInfo, 'avatarUrl' | 'memberSince' | 'username'>): Promise<ProfileResult>
+    /** Abre o seletor de imagem, recorta/reduz e envia a foto. */
+    chooseAvatar(): Promise<ProfileResult>
+    removeAvatar(): Promise<ProfileResult>
+    /** Perfis de outros jogadores (no máximo 8 por vez). */
+    getPublicProfiles(userIds: string[]): Promise<PublicProfile[]>
   }
   judge: {
     resolveEffect(req: JudgeEffectRequest): Promise<JudgeEffectResponse>
     ask(req: JudgeQuestionRequest): Promise<JudgeAnswer>
     test(): Promise<JudgeAnswer>
+  }
+  /** IA do app (Juiz e bot), via Edge Function do Supabase. */
+  ai: {
+    complete(req: { system: string; user: string; json?: boolean; maxTokens?: number }): Promise<{ ok: boolean; text?: string; error?: string }>
+  }
+  /** Amigos e convites para partidas. */
+  social: {
+    list(): Promise<FriendsState>
+    search(q: string): Promise<{ results: UserSearchResult[]; error?: string }>
+    request(userId: string): Promise<SocialResult>
+    respond(userId: string, accept: boolean): Promise<SocialResult>
+    remove(userId: string): Promise<SocialResult>
+    invite(userId: string, roomCode: string): Promise<SocialResult>
+    dismissInvite(id: number): Promise<SocialResult>
+    pendingInvites(): Promise<GameInvite[]>
+    /** Algo mudou nas amizades (pedido novo, aceito...): recarregue a lista. */
+    onChanged(cb: () => void): () => void
+    /** Ids dos amigos online. */
+    onOnline(cb: (ids: string[]) => void): () => void
+    onInvite(cb: (inv: GameInvite) => void): () => void
+  }
+  /** Painel administrativo (toda ação é conferida no servidor). */
+  admin: {
+    stats(): Promise<AdminResult<AdminStats>>
+    users(q: string, sort: 'recent' | 'active' | 'ai', offset: number): Promise<AdminResult<AdminUser[]>>
+    setAdmin(id: string, make: boolean): Promise<AdminResult>
+    ban(id: string, reason: string, days: number | null): Promise<AdminResult>
+    unban(id: string): Promise<AdminResult>
+    resetAi(id: string): Promise<AdminResult>
+    setAnnouncement(a: Announcement | null): Promise<AdminResult>
+    setAiLimit(limit: number | null): Promise<AdminResult>
+    log(): Promise<AdminResult<AdminLogEntry[]>>
+    /** Aviso para todos os jogadores (null = nenhum). */
+    announcement(): Promise<Announcement | null>
+    /** Ids dos administradores (selo nos perfis). */
+    adminIds(): Promise<string[]>
+  }
+  /** Relatório de problemas do motor de regras. */
+  issues: {
+    record(list: IssueInput[]): Promise<void>
+    list(): Promise<StoredIssue[]>
+    clear(keys?: string[]): Promise<StoredIssue[]>
+    /** Salva em .md (diálogo); devolve o caminho ou null se cancelado. `fixed`: chaves já corrigidas (ficam de fora). */
+    export(fixed: string[], source?: 'local' | 'remote'): Promise<string | null>
+    markdown(fixed: string[], source?: 'local' | 'remote'): Promise<string>
+    /** Relatório de todos os jogadores (Supabase) — só para administradores. */
+    remoteIsAdmin(): Promise<boolean>
+    remoteList(): Promise<StoredIssue[]>
+    remoteClear(keys: string[]): Promise<StoredIssue[]>
   }
 }
 
@@ -176,6 +248,7 @@ export const IPC = {
   settingsSet: 'settings:set',
   playmatChoose: 'settings:playmatChoose',
   playmatClear: 'settings:playmatClear',
+  playmatShare: 'settings:playmatShare',
   dbStatus: 'db:status',
   dbDownload: 'db:download',
   dbCancel: 'db:cancel',
@@ -240,9 +313,45 @@ export const IPC = {
   authGoogle: 'auth:google',
   authSetUsername: 'auth:setUsername',
   authSignOut: 'auth:signOut',
+  profileGet: 'profile:get',
+  profileSave: 'profile:save',
+  profileAvatar: 'profile:avatar',
+  profileAvatarRemove: 'profile:avatarRemove',
+  profilePublic: 'profile:public',
   judgeEffect: 'judge:effect',
   judgeAsk: 'judge:ask',
-  judgeTest: 'judge:test'
+  judgeTest: 'judge:test',
+  aiComplete: 'ai:complete',
+  socialList: 'social:list',
+  socialSearch: 'social:search',
+  socialRequest: 'social:request',
+  socialRespond: 'social:respond',
+  socialRemove: 'social:remove',
+  socialInvite: 'social:invite-send',
+  socialDismiss: 'social:dismiss',
+  socialPending: 'social:pending',
+  socialChanged: 'social:changed',
+  socialOnline: 'social:online',
+  socialInviteEvent: 'social:invite',
+  issuesRecord: 'issues:record',
+  issuesList: 'issues:list',
+  issuesClear: 'issues:clear',
+  issuesExport: 'issues:export',
+  issuesMarkdown: 'issues:markdown',
+  issuesRemoteAdmin: 'issues:remoteAdmin',
+  issuesRemoteList: 'issues:remoteList',
+  issuesRemoteClear: 'issues:remoteClear',
+  adminStats: 'admin:stats',
+  adminUsers: 'admin:users',
+  adminSetAdmin: 'admin:setAdmin',
+  adminBan: 'admin:ban',
+  adminUnban: 'admin:unban',
+  adminResetAi: 'admin:resetAi',
+  adminSetAnnouncement: 'admin:setAnnouncement',
+  adminSetAiLimit: 'admin:setAiLimit',
+  adminLog: 'admin:log',
+  adminAnnouncement: 'admin:announcement',
+  adminIds: 'admin:ids'
 } as const
 
 /** URL da imagem de uma carta de Pokémon (cache local). quality: low (listas) ou high (detalhes). */

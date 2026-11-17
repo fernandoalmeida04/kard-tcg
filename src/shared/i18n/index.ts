@@ -21,6 +21,11 @@ import enGamesUi from './en/gamesUi.ts'
 import enYgo from './en/ygo.ts'
 import enAuth from './en/auth.ts'
 import enOnline from './en/online.ts'
+import enIssues from './en/issues.ts'
+import enSocial from './en/social.ts'
+import enPkmGame from './en/pkmGame.ts'
+import enSandbox from './en/sandbox.ts'
+import enAdmin from './en/admin.ts'
 
 export type UiLang = 'pt' | 'en'
 
@@ -31,7 +36,7 @@ export const UI_LANGUAGES: { code: UiLang; label: string; locale: string }[] = [
 
 const DICTS: Record<UiLang, Record<string, string> | null> = {
   pt: null,
-  en: { ...enShared, ...enMain, ...enEngine, ...enParser, ...enComponents, ...enPages, ...enGame, ...enPokemon, ...enPokemonPages, ...enPokemonEditor, ...enGames, ...enGamesUi, ...enYgo, ...enAuth, ...enOnline }
+  en: { ...enShared, ...enMain, ...enEngine, ...enParser, ...enComponents, ...enPages, ...enGame, ...enPokemon, ...enPokemonPages, ...enPokemonEditor, ...enGames, ...enGamesUi, ...enYgo, ...enAuth, ...enOnline, ...enIssues, ...enSocial, ...enPkmGame, ...enSandbox, ...enAdmin }
 }
 
 let current: UiLang = 'pt'

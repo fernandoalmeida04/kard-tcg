@@ -6,7 +6,7 @@
 //   2. o anfitrião valida no motor; se for válida, publica `act` com um número de sequência;
 //   3. todos (inclusive o anfitrião) aplicam os `act` em ordem.
 // Quem entra/reconecta pede `sync` e recebe o `start` + todas as ações já feitas.
-import type { Action } from '../engine/types.ts'
+import type { SAction } from '../sandbox/types.ts'
 import type { CardFinish, FormatId } from '../types.ts'
 
 export type RoomMode = 'duel' | 'commander'
@@ -17,6 +17,8 @@ export interface RoomConfig {
   format: FormatId
   maxPlayers: number
   hostId: string
+  /** Jogo da mesa (padrão: Magic). */
+  tcg?: 'mtg' | 'pokemon'
 }
 
 /** Deck enviado pela rede: só ids (cada computador monta as cartas pelo próprio banco local). */
@@ -40,6 +42,8 @@ export interface LobbyPlayer {
   username: string
   deck?: CompactDeck
   ready: boolean
+  /** Cor do jogador no histórico da partida. */
+  color?: string
 }
 
 export interface OnlinePresence {
@@ -55,13 +59,15 @@ export interface OnlineSetup {
   /** Juiz IA ligado (só o anfitrião consulta o Claude; o resultado entra como ação). */
   aiEnabled?: boolean
   /** Em ordem de assento (0..n-1). */
-  players: { userId: string; username: string; deck: CompactDeck }[]
+  players: { userId: string; username: string; deck: CompactDeck; color?: string }[]
+  /** Jogo da partida (padrão: Magic). */
+  tcg?: 'mtg' | 'pokemon'
 }
 
 export interface OnlineAct {
   seq: number
   seat: number
-  action: Action
+  action: SAction
 }
 
 export type RoomMessage =
@@ -71,12 +77,15 @@ export type RoomMessage =
   | { type: 'lobby'; config: RoomConfig; players: LobbyPlayer[]; started: boolean }
   | { type: 'deck'; userId: string; deck: CompactDeck }
   | { type: 'ready'; userId: string; ready: boolean }
+  | { type: 'color'; userId: string; color: string }
+  /** Veredito do Juiz IA sobre uma linha do histórico (quem chamou envia para todos). */
+  | { type: 'judge'; userId: string; logId: number; verdict: { valid: boolean; title: string; explanation: string; by: string } }
   | { type: 'leave'; userId: string }
   | { type: 'kick'; userId: string }
   /** Início da partida (anfitrião). */
   | { type: 'start'; setup: OnlineSetup }
   /** Jogada pretendida (qualquer jogador → anfitrião). */
-  | { type: 'intent'; seat: number; nonce: string; action: Action }
+  | { type: 'intent'; seat: number; nonce: string; action: SAction }
   /** Jogada aceita e numerada (anfitrião → todos). */
   | ({ type: 'act' } & OnlineAct)
   /** Jogada recusada (anfitrião → quem tentou). */
@@ -86,6 +95,10 @@ export type RoomMessage =
   /** Resposta: setup + ações a partir de fromSeq (pode vir em vários pedaços). */
   | { type: 'sync'; to: string; setup: OnlineSetup; acts: OnlineAct[]; final: boolean }
   | { type: 'chat'; userId: string; username: string; text: string }
+  /** Imagem de playmat de um jogador (data URL em pedaços, por causa do limite de tamanho das mensagens). */
+  | { type: 'mat'; userId: string; id: string; part: number; total: number; data: string }
+  /** Pedido para todos reenviarem o playmat (quem entrou/reconectou na partida). */
+  | { type: 'mat-req'; userId: string }
 
 /** Código de mesa: 6 caracteres sem letras/números confundíveis. */
 export function makeRoomCode(): string {

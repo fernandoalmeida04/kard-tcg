@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '../shared/api'
 import type { KardApi } from '../shared/api'
-import type { AuthUser, DownloadProgress, UpdateStatus } from '../shared/types'
+import type { AuthUser, DownloadProgress, GameInvite, UpdateStatus } from '../shared/types'
 import type { GameId } from '../shared/games/types'
 import type { OnlinePresence, RoomMessage } from '../shared/online/protocol'
 
@@ -24,7 +24,8 @@ const api: KardApi = {
     get: () => invoke(IPC.settingsGet),
     set: (update) => invoke(IPC.settingsSet, update),
     choosePlaymat: () => invoke(IPC.playmatChoose),
-    clearPlaymat: () => invoke(IPC.playmatClear)
+    clearPlaymat: () => invoke(IPC.playmatClear),
+    playmatShareData: () => invoke(IPC.playmatShare)
   },
   db: {
     status: () => invoke(IPC.dbStatus),
@@ -132,12 +133,68 @@ const api: KardApi = {
     signIn: (email, password) => invoke(IPC.authSignIn, email, password),
     signInWithGoogle: () => invoke(IPC.authGoogle),
     setUsername: (username) => invoke(IPC.authSetUsername, username),
-    signOut: () => invoke(IPC.authSignOut)
+    signOut: () => invoke(IPC.authSignOut),
+    getProfile: () => invoke(IPC.profileGet),
+    saveProfile: (info) => invoke(IPC.profileSave, info),
+    chooseAvatar: () => invoke(IPC.profileAvatar),
+    removeAvatar: () => invoke(IPC.profileAvatarRemove),
+    getPublicProfiles: (ids) => invoke(IPC.profilePublic, ids)
   },
   judge: {
     resolveEffect: (req) => invoke(IPC.judgeEffect, req),
     ask: (req) => invoke(IPC.judgeAsk, req),
     test: () => invoke(IPC.judgeTest)
+  },
+  ai: {
+    complete: (req) => invoke(IPC.aiComplete, req)
+  },
+  social: {
+    list: () => invoke(IPC.socialList),
+    search: (q) => invoke(IPC.socialSearch, q),
+    request: (id) => invoke(IPC.socialRequest, id),
+    respond: (id, accept) => invoke(IPC.socialRespond, id, accept),
+    remove: (id) => invoke(IPC.socialRemove, id),
+    invite: (id, code) => invoke(IPC.socialInvite, id, code),
+    dismissInvite: (id) => invoke(IPC.socialDismiss, id),
+    pendingInvites: () => invoke(IPC.socialPending),
+    onChanged: (cb) => {
+      const listener = () => cb()
+      ipcRenderer.on(IPC.socialChanged, listener)
+      return () => ipcRenderer.removeListener(IPC.socialChanged, listener)
+    },
+    onOnline: (cb) => {
+      const listener = (_e: unknown, ids: string[]) => cb(ids)
+      ipcRenderer.on(IPC.socialOnline, listener)
+      return () => ipcRenderer.removeListener(IPC.socialOnline, listener)
+    },
+    onInvite: (cb) => {
+      const listener = (_e: unknown, inv: GameInvite) => cb(inv)
+      ipcRenderer.on(IPC.socialInviteEvent, listener)
+      return () => ipcRenderer.removeListener(IPC.socialInviteEvent, listener)
+    }
+  },
+  admin: {
+    stats: () => invoke(IPC.adminStats),
+    users: (q, sort, offset) => invoke(IPC.adminUsers, q, sort, offset),
+    setAdmin: (id, make) => invoke(IPC.adminSetAdmin, id, make),
+    ban: (id, reason, days) => invoke(IPC.adminBan, id, reason, days),
+    unban: (id) => invoke(IPC.adminUnban, id),
+    resetAi: (id) => invoke(IPC.adminResetAi, id),
+    setAnnouncement: (a) => invoke(IPC.adminSetAnnouncement, a),
+    setAiLimit: (limit) => invoke(IPC.adminSetAiLimit, limit),
+    log: () => invoke(IPC.adminLog),
+    announcement: () => invoke(IPC.adminAnnouncement),
+    adminIds: () => invoke(IPC.adminIds)
+  },
+  issues: {
+    record: (list) => invoke(IPC.issuesRecord, list),
+    list: () => invoke(IPC.issuesList),
+    clear: (keys) => invoke(IPC.issuesClear, keys),
+    export: (fixed, source) => invoke(IPC.issuesExport, fixed, source),
+    markdown: (fixed, source) => invoke(IPC.issuesMarkdown, fixed, source),
+    remoteIsAdmin: () => invoke(IPC.issuesRemoteAdmin),
+    remoteList: () => invoke(IPC.issuesRemoteList),
+    remoteClear: (keys) => invoke(IPC.issuesRemoteClear, keys)
   }
 }
 

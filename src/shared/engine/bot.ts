@@ -2,7 +2,7 @@
 // Pensado para 1 contra 1; com mais jogadores ele foca o oponente com menos vida (`mainEnemy`).
 
 import {
-  actingPlayer,
+  canAct,
   activateInfo,
   attackersAgainst,
   availableManaCount,
@@ -566,8 +566,8 @@ function botPriority(state: GameState, p: PlayerId): Action {
 
 /** Decide a próxima ação do bot (ou null se não for a vez dele). */
 export function botAction(state: GameState, p: PlayerId): Action | null {
-  if (actingPlayer(state) !== p) return null
-  const ch = currentChoice(state)
+  if (!canAct(state, p)) return null
+  const ch = currentChoice(state, p)
   if (ch) return botChoice(state, p, ch)
   if (state.awaiting?.kind === 'attackers') return botAttack(state, p)
   if (state.awaiting?.kind === 'blockers') return botBlock(state, p)
@@ -576,7 +576,7 @@ export function botAction(state: GameState, p: PlayerId): Action | null {
 
 /** Ação de fallback se o motor recusar a ação proposta pelo bot. */
 export function botFallback(state: GameState, p: PlayerId): Action {
-  const ch = currentChoice(state)
+  const ch = currentChoice(state, p)
   if (ch) {
     if (ch.kind === 'mulligan') return { t: 'keep' }
     if (ch.kind === 'targets') return { t: 'chooseTargets', targets: ch.trigger.ability.targets.map(() => null) }
